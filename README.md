@@ -8,6 +8,23 @@ Hear No Evil is a top down survival horror puzzle game that explores themes of s
 
 Our prototype relies on an interactive loop tying action, feedback, player decisions, and progression together without heavy instruction menus. Players navigate corridors using keyboard inputs while directing a restricted, mouse driven visibility field across the canvas. Immediate visual and haptic feedback triggers when entities approach, forcing real-time tactical changes as players pivot their view cone to freeze stalking targets. Successful execution drives level progression, allowing users to secure the key and clear the stage. We integrated sensory limits directly into our core gameplay loop instead of treating them as a narrative dressing. Matching Sweetser and Wyeth's GameFlow principles, we mapped the character's profound hearing loss directly to challenge scaling and learning mechanisms [2]. By substituting traditional auditory cues with a physical ground-vibration warning, our screenshake scripts simulate feeling heavy thuds through floorboards when an unseen enemy draws near. This mechanic demands fast player evaluation: turn around immediately to trigger the entity freeze constraint, or check the spatial overlay to avoid dead ends. Additionally, we carefully applied Gaver's technology affordance framework to guide players through environmental mechanics naturally [1]. The soft visual glow of the hidden key establishes a perceptible affordance that draws player intent, while changing the exit door from red to green instinctively signals completion [1]. Based on our TA Jieun Lee's framework for observation, our feedback elements include a bounded cursor tracking bubble and a brief post death red predator silhouette outline, ensuring players quickly adapt their positioning strategy after a failure [3].
 
+## Levels
+
+The escape now runs across two stages, and clearing the first only moves you outdoors rather than ending the run.
+
+Level 1 — The Mansion. The interior, laid out in `data/blocks.json`: the player starts in the north-west room, with the West Library below it, the Central Grand Foyer and its rug in the middle, the North Sitting Room off to the east, the South Dining Hall along the bottom, and the locked exit on the east wall past the key hall.
+
+Its walls are auto-tiled. The map only marks `@` for "wall here", and the renderer works out from the four neighbours whether that tile should be a straight run, a corner, a T-junction or a four-way cross, then rotates the right piece into place. This means junctions always line up, and the layout can be edited by typing `@` into `tiles[]` without anyone having to track which orientation goes where. The exit is drawn as two door leaves. The leaf art is upright — planks vertical, knob on its right edge — but every doorway in the game is a tall gap in a side wall, so each leaf is laid on its side: the upper one turned a quarter clockwise, the lower one that same rotation mirrored. Both knobs end up on the inner edges, meeting on the join in the middle of the opening.
+Level 2 — The Courtyard. Stepping through the mansion's unlocked door fades you into an overgrown walled garden laid out in `data/courtyard.json`. Mossy cobblestone replaces the floorboards, and instead of the mansion's straight corridors the space is broken up by an asymmetric run of clipped hedges: a walk-in alcove in the north-west, a parterre stepping down toward the centre, a broken ring around the stone well, and a serpentine sweep across the south. A reflecting pool sits in the south-west. The vampire, the key, and the flashlight all behave exactly as they do indoors.
+
+The courtyard adds one mechanic of its own: puddles. Standing water is scattered across the paving, and stepping into one puts the player on the floor. The screen blows out white, a tinnitus ring starts up, and for about a second and a half he has no control and no flashlight. He does not die — he loses his feet, his light and his time, and the vampire keeps walking the whole while. Because nothing can be frozen by a light that is not on, a knockout in the wrong place is what kills you rather than the water itself.
+
+This is what the level is really about. Indoors the only thing worth looking at was behind you; outdoors you also have to watch where you are putting your feet, and the flashlight cone cannot cover both at once. That tension between checking your back and checking your path is the whole design of the stage.
+
+To keep it fair rather than arbitrary, a puddle triggers on the tile under the player's centre rather than anywhere the hitbox touches, so deliberately skirting the edge of one works. The key is also never placed on a puddle or anywhere only reachable by crossing one, so no run is unwinnable.
+
+Both levels use the same tile-map format, so `drawRoom()` and `initGame()` are level-agnostic; `LEVELS` in `sketch.js` just points each stage at its own JSON and its own floor/wall/corner images.
+
 ## Setup and Interaction Instructions
 
 ## Prerequisites
@@ -49,6 +66,21 @@ Dynamic Furniture and Asset Population: To expand our layout complexity and impr
 | `assets/sounds/footstep1.mp3`   | https://pixabay.com/sound-effects/film-special-effects-st1-footstep-sfx-323053/ [7]                  |
 | `assets/sounds/footstep2.mp3`   | https://pixabay.com/sound-effects/film-special-effects-st2-footstep-sfx-323055/ [8]                  |
 | `assets/sounds/breathing.mp3`   | https://pixabay.com/sound-effects/people-heavy-breathing-sound-effect-type-01-294190/ [9]            |
+| `assets/images/courtyardfloor.png`, `courtyardmoss.png`, `ivy.png` | Courtyard ground tiles (cobblestone, mossy cobblestone, ivy) — original 32x32 assets drawn by our group. |
+| `assets/images/courtyardwall.png`, `courtyardcorner.png` | Weathered stone boundary wall and corner — original 32x32 assets drawn by our group. |
+| `assets/images/hedge.png`, `flowerbush.png` | Hedge mass and flowering hedge — original 32x32 assets drawn by our group. |
+| `assets/images/wellquarter.png` | One quarter of the central well; the map rotates it four ways to build the 2x2 ring — original 32x32 asset drawn by our group. |
+| `assets/images/wallVertical.png`, `wallHorizontal.png`, `wallCorner.png`, `wallTee.png`, `wallPlus.png` | Auto-tiling mansion wall set (straight, corner, T-junction, four-way) — original 32x32 assets drawn by our group. |
+| `assets/images/doorLeaf.png`    | Single door leaf; the exit draws two of them, the lower one flipped — original 32x32 asset drawn by our group. |
+| `assets/images/puddle.png`      | Standing water hazard — original 32x32 asset drawn by our group.                                      |
+| `assets/sounds/ringing.wav`     | Tinnitus ring for the knockout. Synthesised from scratch by `tools/make_ringing_sfx.py`, not sourced.  |
+| `assets/images/poolwater.png`, `crate.png`, `gate.png` | Reflecting pool, crate and boarded gate — original 32x32 assets drawn by our group. |
+| `data/courtyard.json`           | Level 2 tile layout, designed entirely by our group members.                                          |
+
+The courtyard tiles are generated by `tools/make_courtyard_tiles.py`, which draws each
+32x32 sprite pixel by pixel with Pillow. Run `python tools/make_courtyard_tiles.py` to
+rebuild them after editing the palette or a shape. The ground, hedge and water tiles are
+authored to wrap, so a field of them shows no repeating grid.
 
 ## References
 

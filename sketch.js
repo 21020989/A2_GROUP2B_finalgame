@@ -33,12 +33,36 @@ let carpetCornerImg, carpetMiddleImg, carpetTopImg;
 let shakeX = 0,
   shakeY = 0;
 
-// Tile map
+// Tile map. These three always point at the CURRENT level's tileset;
+// initGame() swaps them when you move from the mansion to the courtyard.
 let tileWallImg, tileCornerImg, tileFloorImg;
 let tileMapData;
 let TILE_SIZE = 40;
 let mapCols = 50;
 let mapRows = 40;
+
+// Level 1 — the mansion interior. Its walls are auto-tiled: the map only
+// marks '@' for "wall here" and the renderer picks the straight / corner /
+// tee / cross piece from the four neighbours, so junctions always meet up.
+let mansionMapData, mansionFloorImg, mansionWallImg, mansionCornerImg;
+let wallVerticalImg, wallHorizontalImg, wallCornerImg, wallTeeImg, wallPlusImg;
+let doorLeafImg;
+
+// Level 2 — the overgrown courtyard.
+let courtyardMapData, cyFloorImg, cyWallImg, cyCornerImg;
+let cyMossImg, cyIvyImg, hedgeImg, flowerBushImg;
+let poolImg, wellImg, crateImg, gateImg, puddleImg;
+
+let currentLevel = 0;
+
+// Every character that blocks movement and casts a flashlight shadow.
+// Mansion: walls, corners, tables, sign. Courtyard: hedges, water, the well,
+// crates, the boarded gate.
+const SOLID_CHARS = "LRUBNESWCTDG@#%~opqvkX";
+
+// Walkable, but standing on one ends the run. Kept separate from SOLID_CHARS
+// because a puddle has to let you in — that's the whole point of it.
+const HAZARD_CHARS = "*";
 
 // Tutorial / intro
 let tutorialStartX = 0,
@@ -61,12 +85,13 @@ let nextStrobe = 0;
 
 // Audio
 let bgMusic, whisperSound, musicFilter, whisperFilter;
-let seenSound, gameoverSound;
+let seenSound, gameoverSound, ringingSound;
 let footstep1, footstep2, breathingSound, bodyFilter;
 let musicReady = false,
   whisperReady = false;
 let seenReady = false,
-  gameoverReady = false;
+  gameoverReady = false,
+  ringingReady = false;
 let footstep1Ready = false,
   footstep2Ready = false,
   breathingReady = false;
@@ -85,23 +110,37 @@ const DEATH_CAM_MS = 1500;
 let deathStart = 0;
 let killPos = null;
 
+// Knockout — walking into standing water puts you on the floor rather than
+// killing you. You keep the level, but you lose your feet, your light and
+// about a second and a half, which is plenty of time for something to reach
+// you. Short on purpose: it should read as a punishment, not a cutscene.
+const KO_MS = 1500;
+let koActive = false;
+let koStart = 0;
+
 // ---------------------------------------------------------------------
+// Tiles are all 32x32 and get scaled to TILE_SIZE on draw, so every new
+// courtyard asset is authored at the same size as the mansion set.
+function loadTile(name) {
+  return loadImage(
+    "assets/images/" + name + ".png",
+    () => {},
+    () => {},
+  );
+}
+
 function preload() {
-  tileWallImg = loadImage(
-    "assets/images/wall.png",
-    () => {},
-    () => {},
-  );
-  tileCornerImg = loadImage(
-    "assets/images/corner.png",
-    () => {},
-    () => {},
-  );
-  tileFloorImg = loadImage(
-    "assets/images/floor.png",
-    () => {},
-    () => {},
-  );
+  mansionWallImg = loadTile("wall");
+  mansionCornerImg = loadTile("corner");
+  mansionFloorImg = loadTile("floor");
+
+  // Auto-tiling wall set for the mansion
+  wallVerticalImg = loadTile("wallVertical");
+  wallHorizontalImg = loadTile("wallHorizontal");
+  wallCornerImg = loadTile("wallCorner");
+  wallTeeImg = loadTile("wallTee");
+  wallPlusImg = loadTile("wallPlus");
+  doorLeafImg = loadTile("doorLeaf");
   playerImg = loadImage(
     "assets/images/mainguy2.png",
     () => {},
@@ -167,8 +206,43 @@ function preload() {
     () => {},
     () => {},
   );
-  tileMapData = loadJSON("data/blocks.json");
+
+  // Courtyard tileset (level 2)
+  cyFloorImg = loadTile("courtyardfloor");
+  cyMossImg = loadTile("courtyardmoss");
+  cyIvyImg = loadTile("ivy");
+  cyWallImg = loadTile("courtyardwall");
+  cyCornerImg = loadTile("courtyardcorner");
+  hedgeImg = loadTile("hedge");
+  flowerBushImg = loadTile("flowerbush");
+  poolImg = loadTile("poolwater");
+  puddleImg = loadTile("puddle");
+  wellImg = loadTile("wellquarter");
+  crateImg = loadTile("crate");
+  gateImg = loadTile("gate");
+
+  mansionMapData = loadJSON("data/blocks.json");
+  courtyardMapData = loadJSON("data/courtyard.json");
 }
+
+// Both levels share the same tile-map format; only the art and the layout
+// differ, so drawRoom()/initGame() stay level-agnostic.
+const LEVELS = [
+  {
+    name: "The Mansion",
+    data: () => mansionMapData,
+    floor: () => mansionFloorImg,
+    wall: () => mansionWallImg,
+    corner: () => mansionCornerImg,
+  },
+  {
+    name: "The Courtyard",
+    data: () => courtyardMapData,
+    floor: () => cyFloorImg,
+    wall: () => cyWallImg,
+    corner: () => cyCornerImg,
+  },
+];
 
 function setup() {
   createCanvas(CANVAS_W, CANVAS_H);
@@ -176,6 +250,10 @@ function setup() {
   textFont("monospace");
   noCursor();
   camera = { x: 0, y: 0 };
+
+  // The tutorial room is drawn with the mansion tileset, before any level
+  // has been loaded, so point at level 1 up front.
+  applyLevelTileset(0);
 
   if (tileMapData) {
     TILE_SIZE = tileMapData.tileSize || TILE_SIZE;
@@ -227,6 +305,16 @@ function loadAudio() {
         gameoverReady = true;
       },
       () => console.warn("gameover.mp3 not found — disabled."),
+    );
+    // Tinnitus ring for the knockout. Left unfiltered like the other stings:
+    // the ringing is inside his head, not a sound in the room, so the muffling
+    // that stands in for his hearing loss shouldn't apply to it.
+    ringingSound = loadSound(
+      "assets/sounds/ringing.wav",
+      () => {
+        ringingReady = true;
+      },
+      () => console.warn("ringing.wav not found — disabled."),
     );
     // Player body sounds (own footsteps + scared breathing), lightly muffled.
     footstep1 = loadSound(
@@ -462,10 +550,34 @@ function initTutorial() {
   gameState = "tutorial";
 }
 
-function initGame() {
-  // Original-map positions (JSON may override spawn/vampire).
+// Swap the map data and the three shared tile images over to a level.
+function applyLevelTileset(level) {
+  currentLevel = constrain(level, 0, LEVELS.length - 1);
+  const lvl = LEVELS[currentLevel];
+  tileMapData = lvl.data();
+  tileFloorImg = lvl.floor();
+  tileWallImg = lvl.wall();
+  tileCornerImg = lvl.corner();
+}
+
+function initGame(level) {
+  applyLevelTileset(level === undefined ? currentLevel : level);
+
+  if (tileMapData) {
+    TILE_SIZE = tileMapData.tileSize || TILE_SIZE;
+    mapCols = tileMapData.cols || mapCols;
+    mapRows = tileMapData.rows || mapRows;
+  }
+
+  // Original-map positions (JSON may override spawn/vampire/door).
   const spawn = (tileMapData && tileMapData.spawn) || { x: 200, y: 200 };
   const vampPos = (tileMapData && tileMapData.vampire) || { x: 1700, y: 1200 };
+  const doorPos = (tileMapData && tileMapData.door) || {
+    x: WORLD_W - 80,
+    y: 700,
+    w: 50,
+    h: 200,
+  };
 
   player = { x: spawn.x, y: spawn.y, r: PLAYER_RADIUS, hasKey: false };
 
@@ -476,7 +588,7 @@ function initGame() {
       let line = tileMapData.tiles[row] || "";
       for (let col = 0; col < mapCols; col++) {
         let ch = line[col] || ".";
-        if ("LRUBNESWCTDG".indexOf(ch) !== -1) {
+        if (SOLID_CHARS.indexOf(ch) !== -1) {
           walls.push({
             x: col * TILE_SIZE,
             y: row * TILE_SIZE,
@@ -501,7 +613,13 @@ function initGame() {
   keyItem = { x: keyPos.x, y: keyPos.y, r: 16, collected: false };
 
   // Exit door aligned with the opening in the right wall.
-  door = { x: WORLD_W - 80, y: 700, w: 50, h: 200, isOpen: false };
+  door = {
+    x: doorPos.x,
+    y: doorPos.y,
+    w: doorPos.w,
+    h: doorPos.h,
+    isOpen: false,
+  };
 
   vampire = {
     x: vampPos.x,
@@ -514,12 +632,15 @@ function initGame() {
   };
 
   whisperVol = 0;
+  koActive = false;
   gameState = "play";
 }
 
 function restartGame() {
   startAudio();
-  initGame();
+  // Dying drops you back at the start of the level you were on; finishing the
+  // last level and pressing R starts the whole escape over.
+  initGame(gameState === "win" ? 0 : currentLevel);
 }
 
 // Flood-fill from the spawn over walkable floor, then pick a random reachable
@@ -527,12 +648,15 @@ function restartGame() {
 function pickRandomKeyTile(spawnX, spawnY) {
   if (!(tileMapData && tileMapData.tiles)) return { x: 1300, y: 950 };
   const tiles = tileMapData.tiles;
-  const isFloor = (c, r) =>
-    r >= 0 &&
-    r < mapRows &&
-    c >= 0 &&
-    c < mapCols &&
-    (tiles[r][c] || ".") === ".";
+  // Anything not solid is walkable — that includes the courtyard's moss and
+  // ivy ground cover, so a patch of it never seals off part of the map.
+  // Puddles count as blocked here: the key must never end up somewhere you
+  // can only reach by dying to get there.
+  const isFloor = (c, r) => {
+    if (r < 0 || r >= mapRows || c < 0 || c >= mapCols) return false;
+    const ch = (tiles[r] || "")[c] || ".";
+    return SOLID_CHARS.indexOf(ch) === -1 && HAZARD_CHARS.indexOf(ch) === -1;
+  };
 
   const startC = floor(spawnX / TILE_SIZE);
   const startR = floor(spawnY / TILE_SIZE);
@@ -584,6 +708,12 @@ function draw() {
   }
 
   updateFlicker();
+  // His torch is out cold along with him — this is what lets the vampire close
+  // the gap, since nothing can be frozen by a light that isn't on.
+  if (koActive) lightOn = false;
+
+  // Rebuilt before anything asks what the light can reach this frame.
+  if (player && door) frameOccluders = getNearbyOccluders();
 
   const frozen =
     fadeActive || (gameState === "tutorial" && !tutorialIntroDismissed);
@@ -595,8 +725,14 @@ function draw() {
       checkKeyPickup();
       checkTutorialCompletion();
     } else if (gameState === "play") {
-      updatePlayer();
-      updateMovementAudio();
+      updateKnockout();
+      if (!koActive) {
+        // He's on the floor: no input, no footsteps, and no chance to walk
+        // out of the puddle he's lying in.
+        updatePlayer();
+        updateMovementAudio();
+        checkPuddleSlip();
+      }
       updateVampire();
       checkKeyPickup();
       checkWinCondition();
@@ -630,6 +766,8 @@ function draw() {
     if (gameState === "play") drawVampire();
     pop();
   }
+
+  drawKnockout();
 
   // HUD
   if (gameState === "tutorial") drawTutorialUI();
@@ -681,7 +819,7 @@ function drawMinimap() {
     const line = tileMapData.tiles[row] || "";
     for (let col = 0; col < mapCols; col++) {
       const ch = line[col] || ".";
-      if ("LRUBNESWCTDG".includes(ch)) {
+      if (SOLID_CHARS.includes(ch)) {
         rect(
           col * TILE_SIZE * scaleX,
           row * TILE_SIZE * scaleY,
@@ -843,7 +981,7 @@ function collidesWithWalls(cx, cy) {
       let line = tileMapData.tiles[r] || "";
       for (let c = colLeft; c <= colRight; c++) {
         let ch = line[c] || ".";
-        if ("LRUBNESWCTDG".indexOf(ch) !== -1) {
+        if (SOLID_CHARS.indexOf(ch) !== -1) {
           if (
             circleRectCollision(
               cx,
@@ -896,13 +1034,18 @@ function checkKeyPickup() {
 }
 
 function checkWinCondition() {
-  if (!player.hasKey) return;
+  if (!player.hasKey || fadeActive) return;
   if (
     player.x > door.x + door.w &&
     player.y > door.y - player.r &&
     player.y < door.y + door.h + player.r
   ) {
-    gameState = "win";
+    // Escaping the mansion only gets you as far as the courtyard.
+    if (currentLevel < LEVELS.length - 1) {
+      startFade(() => initGame(currentLevel + 1));
+    } else {
+      gameState = "win";
+    }
   }
 }
 
@@ -941,8 +1084,56 @@ function checkVampireCatch() {
   }
 }
 
-// Freeze on the grab, show him getting you, then hand off to the death screen.
+// The courtyard's standing water. It triggers on the tile under your feet —
+// the player's centre — not on anything the hitbox merely brushes, so skirting
+// the edge of a puddle is a real option rather than a coin flip.
+function checkPuddleSlip() {
+  if (koActive || !(tileMapData && tileMapData.tiles)) return;
+  const col = floor(player.x / TILE_SIZE);
+  const row = floor(player.y / TILE_SIZE);
+  if (row < 0 || row >= mapRows || col < 0 || col >= mapCols) return;
+  const ch = (tileMapData.tiles[row] || "")[col] || ".";
+  if (HAZARD_CHARS.indexOf(ch) !== -1) startKnockout();
+}
+
+function startKnockout() {
+  koActive = true;
+  koStart = millis();
+  playOneShot(ringingSound, ringingReady, 0.5);
+}
+
+// While he is out: no input, no flashlight, and the vampire keeps coming.
+// Handled here rather than in updatePlayer so the vampire still updates.
+function updateKnockout() {
+  if (koActive && millis() - koStart >= KO_MS) koActive = false;
+}
+
+// Blown-out white on impact, dropping to a haze he comes round from, with
+// rings washing out in time with the tone.
+function drawKnockout() {
+  if (!koActive) return;
+  const t = constrain((millis() - koStart) / KO_MS, 0, 1);
+  const a = t < 0.1 ? map(t, 0, 0.1, 255, 105) : map(t, 0.1, 1, 105, 0);
+
+  push();
+  noStroke();
+  fill(255, 255, 255, a);
+  rect(0, 0, width, height);
+
+  noFill();
+  for (let i = 0; i < 2; i++) {
+    const rt = constrain(t * 1.5 - i * 0.3, 0, 1);
+    if (rt <= 0 || rt >= 1) continue;
+    stroke(255, 255, 255, 150 * (1 - rt));
+    strokeWeight(2 + 6 * (1 - rt));
+    ellipse(width / 2, height / 2, 120 + 900 * rt);
+  }
+  pop();
+}
+
+// Freeze on the moment, play it out, then hand off to the death screen.
 function startDeathCam() {
+  if (gameState === "dying") return;
   gameState = "dying";
   deathStart = millis();
   killPos = { vx: vampire.x, vy: vampire.y, px: player.x, py: player.y };
@@ -1017,12 +1208,25 @@ function drawDeathCam() {
 // ---------------------------------------------------------------------
 //  DRAWING — WORLD
 // ---------------------------------------------------------------------
+// The map is wider than the canvas, so only walk the tiles the camera can
+// actually see. Two tiles of margin covers the screen-shake offset.
+function visibleTiles() {
+  const m = 2;
+  return {
+    c0: max(0, floor(camera.x / TILE_SIZE) - m),
+    c1: min(mapCols - 1, floor((camera.x + CANVAS_W) / TILE_SIZE) + m),
+    r0: max(0, floor(camera.y / TILE_SIZE) - m),
+    r1: min(mapRows - 1, floor((camera.y + CANVAS_H) / TILE_SIZE) + m),
+  };
+}
+
 function drawRoom() {
   if (!(tileMapData && tileMapData.tiles)) return;
 
-  for (let row = 0; row < mapRows; row++) {
+  const v = visibleTiles();
+  for (let row = v.r0; row <= v.r1; row++) {
     let line = tileMapData.tiles[row] || "";
-    for (let col = 0; col < mapCols; col++) {
+    for (let col = v.c0; col <= v.c1; col++) {
       let x = col * TILE_SIZE;
       let y = row * TILE_SIZE;
       if (tileFloorImg) image(tileFloorImg, x, y, TILE_SIZE, TILE_SIZE);
@@ -1049,10 +1253,29 @@ function drawRoom() {
         rotationAngle = 0;
       }
 
-      if (isWall) {
+      if (ch === "@") {
+        drawAutoWall(col, row, x, y);
+      } else if (isWall) {
         drawTile(tileWallImg, x, y, rotationAngle, color(100, 100, 170));
       } else if (isCorner) {
         drawTile(tileCornerImg, x, y, rotationAngle, color(140, 120, 200));
+      } else if (ch === ",") {
+        drawTile(cyMossImg, x, y, 0, color(70, 96, 52));
+      } else if (ch === "i") {
+        drawTile(cyIvyImg, x, y, 0, color(52, 92, 44));
+      } else if (ch === "*") {
+        // Rotated per-tile so a scattering of puddles doesn't look stamped.
+        drawTile(
+          puddleImg,
+          x,
+          y,
+          ((col * 7 + row * 13) % 4) * HALF_PI,
+          color(46, 120, 140),
+        );
+      } else if (ch === "X") {
+        drawTile(gateImg, x, y, 0, color(90, 58, 30));
+      } else if (drawPropTile(ch, x, y)) {
+        // furniture and scenery — drawFurniture() redraws these lit
       } else if (ch === "1") {
         drawTile(carpetCornerImg, x, y, 0, color(120, 40, 40));
       } else if (ch === "4") {
@@ -1143,37 +1366,112 @@ function drawRoom() {
   }
 }
 
-// Furniture/obstacle sprites (table, dinnertable, chairback, sign) are drawn
-// separately from the floor/walls and layered with the entities (door,
-// player, key, vampire) — after the darkness overlay and the flashlight
-// glow — so the overlay's occlusion boundary (which treats them as walls)
-// never shadows their sprite into a black silhouette at the cone's edge.
-// Same visibility rule as the key/vampire: only drawn while lit by the cone.
+// The lit pass over furniture and scenery. drawRoom() has already laid these
+// down under the darkness as silhouettes; this repaints the ones the beam is
+// actually on, at full brightness, above the overlay — so the occlusion
+// boundary never shadows a sprite into a black cut-out at the cone's edge.
+//
+// Skipped during the tutorial: that room is built procedurally and has its own
+// furniture, while tileMapData still points at the mansion. Without this guard
+// the mansion's tables get painted at mansion coordinates inside the tutorial
+// room, where nothing is solid, and you can walk straight through them.
 function drawFurniture() {
+  if (gameState === "tutorial") return;
   if (!(tileMapData && tileMapData.tiles)) return;
 
-  for (let row = 0; row < mapRows; row++) {
+  const v = visibleTiles();
+  for (let row = v.r0; row <= v.r1; row++) {
     let line = tileMapData.tiles[row] || "";
-    for (let col = 0; col < mapCols; col++) {
+    for (let col = v.c0; col <= v.c1; col++) {
       let x = col * TILE_SIZE;
       let y = row * TILE_SIZE;
       let ch = line[col] || ".";
 
-      if (ch !== "T" && ch !== "D" && ch !== "H" && ch !== "G") continue;
+      if ("TDHGk#%~opqv".indexOf(ch) === -1) continue;
+
       if (!isInFlashlight(x + TILE_SIZE / 2, y + TILE_SIZE / 2, { x, y }))
         continue;
 
-      if (ch === "T") {
-        drawTile(tableImg, x, y, 0, color(139, 90, 43));
-      } else if (ch === "D") {
-        drawTile(dinnertableImg, x, y, 0, color(101, 67, 33));
-      } else if (ch === "H") {
-        drawTile(chairbackImg, x, y, 0, color(90, 60, 40));
-      } else if (ch === "G") {
-        drawTile(signImg, x, y, 0, color(120, 100, 60));
-      }
+      drawPropTile(ch, x, y);
     }
   }
+}
+
+// Everything that sits on the floor rather than being part of it: the
+// mansion's furniture and the courtyard's scenery.
+//
+// These are drawn twice. Once by drawRoom() underneath the darkness, which
+// leaves a faint silhouette you can make out before you walk into it, and
+// again by drawFurniture() once the beam reaches them, which lights them
+// properly instead of leaving the black cut-out that a bare wall becomes.
+// The under-darkness pass matters: every one of these blocks movement, so
+// without it a table in an unlit room is an invisible wall.
+//
+// Returns false for anything it doesn't handle, so callers can chain on it.
+function drawPropTile(ch, x, y) {
+  if (ch === "T") drawTile(tableImg, x, y, 0, color(139, 90, 43));
+  else if (ch === "D") drawTile(dinnertableImg, x, y, 0, color(101, 67, 33));
+  else if (ch === "H") drawTile(chairbackImg, x, y, 0, color(90, 60, 40));
+  else if (ch === "G") drawTile(signImg, x, y, 0, color(120, 100, 60));
+  else if (ch === "k") drawTile(crateImg, x, y, 0, color(120, 76, 40));
+  else if (ch === "#") drawTile(hedgeImg, x, y, 0, color(40, 84, 34));
+  else if (ch === "%") drawTile(flowerBushImg, x, y, 0, color(48, 96, 40));
+  else if (ch === "~") drawTile(poolImg, x, y, 0, color(30, 100, 118));
+  // One quarter-tile rotated four ways makes the 2x2 well.
+  else if (ch === "o") drawTile(wellImg, x, y, 0, color(120, 124, 120));
+  else if (ch === "p") drawTile(wellImg, x, y, HALF_PI, color(120, 124, 120));
+  else if (ch === "q") drawTile(wellImg, x, y, PI, color(120, 124, 120));
+  else if (ch === "v")
+    drawTile(wellImg, x, y, PI + HALF_PI, color(120, 124, 120));
+  else return false;
+  return true;
+}
+
+// Pick the wall piece that matches which of the four neighbours are also wall.
+// Rotations are measured off how the art was drawn: the corner joins right and
+// down at 0, and the tee's stem points right at 0.
+function autoWallPiece(up, right, down, left) {
+  const n = (up ? 1 : 0) + (right ? 1 : 0) + (down ? 1 : 0) + (left ? 1 : 0);
+
+  if (n === 4) return { img: wallPlusImg, rot: 0 };
+
+  if (n === 3) {
+    if (!left) return { img: wallTeeImg, rot: 0 };
+    if (!up) return { img: wallTeeImg, rot: HALF_PI };
+    if (!right) return { img: wallTeeImg, rot: PI };
+    return { img: wallTeeImg, rot: PI + HALF_PI };
+  }
+
+  if (n === 2) {
+    if (up && down) return { img: wallVerticalImg, rot: 0 };
+    if (left && right) return { img: wallHorizontalImg, rot: 0 };
+    if (right && down) return { img: wallCornerImg, rot: 0 };
+    if (down && left) return { img: wallCornerImg, rot: HALF_PI };
+    if (left && up) return { img: wallCornerImg, rot: PI };
+    return { img: wallCornerImg, rot: PI + HALF_PI }; // up && right
+  }
+
+  // A stub or a lone pillar: run it along whichever axis it connects on.
+  if (up || down) return { img: wallVerticalImg, rot: 0 };
+  return { img: wallHorizontalImg, rot: 0 };
+}
+
+// Anything off the edge of the map counts as open, so the outer wall of a room
+// reads as a proper corner instead of sprouting arms into the void.
+function isAutoWall(col, row) {
+  if (!(tileMapData && tileMapData.tiles)) return false;
+  if (row < 0 || row >= mapRows || col < 0 || col >= mapCols) return false;
+  return ((tileMapData.tiles[row] || "")[col] || ".") === "@";
+}
+
+function drawAutoWall(col, row, x, y) {
+  const p = autoWallPiece(
+    isAutoWall(col, row - 1),
+    isAutoWall(col + 1, row),
+    isAutoWall(col, row + 1),
+    isAutoWall(col - 1, row),
+  );
+  drawTile(p.img, x, y, p.rot, color(100, 100, 170));
 }
 
 function drawTile(img, x, y, rotationAngle, fallback) {
@@ -1196,16 +1494,29 @@ function drawTutorialRoom() {
   const cols = 15,
     rows = 13;
 
+  // Same wall test the layout above is built from, so the auto-tiler can ask
+  // about neighbours that fall outside the room.
+  const wallAt = (c, r) => {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
+    if (c === cols - 1) return !(r >= 5 && r <= 7); // the doorway out
+    return r === 0 || r === rows - 1 || c === 0;
+  };
+
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       let x = rx + col * TILE_SIZE;
       let y = ry + row * TILE_SIZE;
       if (tileFloorImg) image(tileFloorImg, x, y, TILE_SIZE, TILE_SIZE);
 
-      let isWall = row === 0 || row === rows - 1 || col === 0;
-      let isDoorOpening = col === cols - 1 && row >= 5 && row <= 7;
-      if (col === cols - 1 && !isDoorOpening) isWall = true;
-      if (isWall) drawTile(tileWallImg, x, y, 0, color(100, 100, 170));
+      if (wallAt(col, row)) {
+        const p = autoWallPiece(
+          wallAt(col, row - 1),
+          wallAt(col + 1, row),
+          wallAt(col, row + 1),
+          wallAt(col - 1, row),
+        );
+        drawTile(p.img, x, y, p.rot, color(100, 100, 170));
+      }
     }
   }
   for (let tbl of tables)
@@ -1241,9 +1552,32 @@ function drawDoor() {
   else fill(220, 60, 60, 70 + 70 * pulse);
   rect(door.x - 10, door.y - 10, door.w + 20, door.h + 20, 10);
 
-  if (doorImg && doorImg.width) {
-    imageMode(CORNER);
-    image(doorImg, door.x, door.y, door.w, door.h);
+  if (doorLeafImg && doorLeafImg.width) {
+    // The leaf is drawn upright — planks vertical, knob on its right edge — but
+    // every doorway in the game is a tall gap in a side wall, so each leaf gets
+    // laid on its side. Turning it a quarter clockwise puts the knob on the
+    // leaf's lower edge; mirroring that for the second leaf puts its knob on its
+    // upper edge, so the two knobs meet on the join in the middle of the opening.
+    const half = door.h / 2;
+    const cx = door.x + door.w / 2;
+
+    push();
+    imageMode(CENTER);
+    // Rotated, so the image's width runs down the opening and its height across.
+    push();
+    translate(cx, door.y + half / 2);
+    rotate(HALF_PI);
+    image(doorLeafImg, 0, 0, half, door.w);
+    pop();
+
+    push();
+    translate(cx, door.y + half + half / 2);
+    scale(1, -1); // mirror of the upper leaf, so it reads as a matched pair
+    rotate(HALF_PI);
+    image(doorLeafImg, 0, 0, half, door.w);
+    pop();
+    pop();
+
     // tint shows locked (red) vs unlocked (green)
     noStroke();
     if (door.isOpen) fill(60, 230, 120, 60);
@@ -1296,6 +1630,12 @@ function drawVampire() {
 // ---------------------------------------------------------------------
 //  LIGHTING (smooth, corner-aware visibility polygon + soft edge)
 // ---------------------------------------------------------------------
+// Walls close enough to cast a shadow this frame. Rebuilt once per frame and
+// shared by the darkness overlay and by every isInFlashlight() test, which
+// would otherwise each walk the whole wall list — that adds up fast in the
+// courtyard, where a few hundred hedge tiles are all occluders.
+let frameOccluders = [];
+
 function getNearbyOccluders() {
   let list = [];
   let range = FLASHLIGHT_DISTANCE + TILE_SIZE;
@@ -1367,7 +1707,7 @@ function drawDarknessOverlay() {
     return null;
   }
 
-  let occ = getNearbyOccluders();
+  let occ = frameOccluders;
   let deltas = buildLightDeltas(cxw, cyw, targetAngle, occ);
 
   let pts = [];
@@ -1467,7 +1807,9 @@ function isInFlashlight(x, y, excludeWall) {
   if (distance >= FLASHLIGHT_DISTANCE || angleDiff >= FLASHLIGHT_ANGLE / 2)
     return false;
 
-  for (let wall of walls) {
+  // Only walls near enough to matter — see frameOccluders above.
+  const list = frameOccluders.length ? frameOccluders : walls;
+  for (let wall of list) {
     // A solid occluder checking its own visibility would otherwise always
     // block itself, since the test point sits at its own tile's center.
     if (excludeWall && wall.x === excludeWall.x && wall.y === excludeWall.y)
@@ -1639,6 +1981,17 @@ function drawUI() {
   text("Move: WASD / Arrows", 18, 28);
   text("Look: cursor", 18, 50);
 
+  fill(190, 190, 200);
+  textSize(14);
+  textAlign(CENTER, BASELINE);
+  text(
+    LEVELS[currentLevel].name + "  —  " + (currentLevel + 1) + "/" + LEVELS.length,
+    width / 2,
+    28,
+  );
+  textSize(16);
+  fill(240);
+
   textAlign(RIGHT, BASELINE);
   if (player.hasKey) {
     fill(120, 220, 120);
@@ -1651,10 +2004,23 @@ function drawUI() {
   fill(255, 200);
   textAlign(CENTER, BASELINE);
   textSize(14);
-  if (!player.hasKey)
+  if (currentLevel === 1 && !player.hasKey)
+    // nudged right, like the line below, so it clears the mini-map
+    text(
+      "Watch your footing — standing water will knock you out cold.",
+      width / 2 + 60,
+      height - 24,
+    );
+  else if (!player.hasKey)
     text(
       "The locked door glows red until you find the key.",
       width / 2 + 20,
+      height - 24,
+    );
+  else if (currentLevel < LEVELS.length - 1)
+    text(
+      "Door unlocked — slip through the green opening into the courtyard.",
+      width / 2,
       height - 24,
     );
   else
@@ -1716,7 +2082,7 @@ function checkTutorialCompletion() {
     player.y > door.y - player.r &&
     player.y < door.y + door.h + player.r
   ) {
-    startFade(() => initGame());
+    startFade(() => initGame(0));
   }
 }
 
