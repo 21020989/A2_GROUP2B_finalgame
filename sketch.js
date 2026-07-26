@@ -654,6 +654,9 @@ function initGame(level) {
   whisperVol = 0;
   koActive = false;
   koGraceUntil = 0;
+  vampPath = [];
+  vampRepathAt = 0;
+  buildVampGrid();
   gameState = "play";
 }
 
@@ -986,20 +989,15 @@ function movePlayer(dx, dy) {
   player.y = constrain(player.y, player.r, worldH - player.r);
 }
 
-function collidesWithWalls(cx, cy) {
+// radius defaults to the player's, but the vampire collides against the same
+// geometry now, so it has to be able to ask on its own behalf.
+function collidesWithWalls(cx, cy, radius) {
+  const r0 = radius === undefined ? player.r : radius;
   if (gameState !== "tutorial" && tileMapData && tileMapData.tiles) {
-    let colLeft = constrain(floor((cx - player.r) / TILE_SIZE), 0, mapCols - 1);
-    let colRight = constrain(
-      floor((cx + player.r) / TILE_SIZE),
-      0,
-      mapCols - 1,
-    );
-    let rowTop = constrain(floor((cy - player.r) / TILE_SIZE), 0, mapRows - 1);
-    let rowBottom = constrain(
-      floor((cy + player.r) / TILE_SIZE),
-      0,
-      mapRows - 1,
-    );
+    let colLeft = constrain(floor((cx - r0) / TILE_SIZE), 0, mapCols - 1);
+    let colRight = constrain(floor((cx + r0) / TILE_SIZE), 0, mapCols - 1);
+    let rowTop = constrain(floor((cy - r0) / TILE_SIZE), 0, mapRows - 1);
+    let rowBottom = constrain(floor((cy + r0) / TILE_SIZE), 0, mapRows - 1);
 
     for (let r = rowTop; r <= rowBottom; r++) {
       let line = tileMapData.tiles[r] || "";
@@ -1087,21 +1085,199 @@ function updateVampire() {
       vampire.state = "stunned";
       vampire.stunTimer = millis();
     } else {
-      // Phases toward the player (ghostly — ignores walls so it never gets stuck).
-      let dx = player.x - vampire.x;
-      let dy = player.y - vampire.y;
-      let d = sqrt(dx * dx + dy * dy);
-      if (d > 0) {
-        let vSpeed = PLAYER_SPEED * 0.7;
-        vampire.x += (dx / d) * vSpeed;
-        vampire.y += (dy / d) * vSpeed;
-      }
+      huntPlayer();
     }
   } else if (vampire.state === "stunned") {
     if (millis() - vampire.stunTimer >= 2000) vampire.state = "chasing";
   }
 
   vampire.wasInCone = inCone;
+}
+
+// The vampire used to phase straight through walls. That made it unfair in a
+// different way to the one intended — it also made the layout irrelevant, since
+// no wall, hedge or table ever changed its route. It now walks the same floor
+// the player does, following a breadth-first path over the tile grid so it
+// still rounds corners and comes through doorways instead of pressing itself
+// against the far side of a wall.
+const VAMP_REPATH_MS = 220;
+let vampPath = [];
+let vampRepathAt = 0;
+
+// Pathfinding runs over half-tile nodes marked with whether a 25px body
+// actually fits there, NOT over tile centres. That distinction matters: in a
+// two-tile doorway both tile centres sit 20px from a wall, so a 25px body fits
+// at neither, and a route through tile centres wedges itself in the opening.
+const VAMP_GRID = TILE_SIZE / 2;
+let vampGridW = 0,
+  vampGridH = 0,
+  vampFree = null;
+
+// Built from the tile data directly rather than via collidesWithWalls(), which
+// branches on gameState and isn't settled yet while a level is initialising.
+function vampBodyFits(x, y, r) {
+  if (x < r || y < r || x > worldW - r || y > worldH - r) return false;
+  const c0 = constrain(floor((x - r) / TILE_SIZE), 0, mapCols - 1);
+  const c1 = constrain(floor((x + r) / TILE_SIZE), 0, mapCols - 1);
+  const r0 = constrain(floor((y - r) / TILE_SIZE), 0, mapRows - 1);
+  const r1 = constrain(floor((y + r) / TILE_SIZE), 0, mapRows - 1);
+  for (let rr = r0; rr <= r1; rr++) {
+    const line = tileMapData.tiles[rr] || "";
+    for (let cc = c0; cc <= c1; cc++) {
+      if (SOLID_CHARS.indexOf(line[cc] || ".") === -1) continue;
+      if (
+        circleRectCollision(
+          x, y, r,
+          cc * TILE_SIZE, rr * TILE_SIZE, TILE_SIZE, TILE_SIZE,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function buildVampGrid() {
+  vampFree = null;
+  if (!(tileMapData && tileMapData.tiles)) return;
+  vampGridW = ceil(worldW / VAMP_GRID);
+  vampGridH = ceil(worldH / VAMP_GRID);
+  vampFree = new Uint8Array(vampGridW * vampGridH);
+  const r = PLAYER_RADIUS;
+  for (let gy = 0; gy < vampGridH; gy++) {
+    for (let gx = 0; gx < vampGridW; gx++) {
+      const x = gx * VAMP_GRID + VAMP_GRID / 2;
+      const y = gy * VAMP_GRID + VAMP_GRID / 2;
+      vampFree[gy * vampGridW + gx] = vampBodyFits(x, y, r) ? 1 : 0;
+    }
+  }
+}
+
+// A body standing in a legal spot doesn't necessarily sit on a free node —
+// tile centres and node centres never coincide — so snap to the closest one
+// rather than giving up and standing still.
+function nearestFreeNode(x, y) {
+  const gx = constrain(floor(x / VAMP_GRID), 0, vampGridW - 1);
+  const gy = constrain(floor(y / VAMP_GRID), 0, vampGridH - 1);
+  if (vampFree[gy * vampGridW + gx]) return gy * vampGridW + gx;
+  for (let rad = 1; rad <= 4; rad++) {
+    for (let dy = -rad; dy <= rad; dy++) {
+      for (let dx = -rad; dx <= rad; dx++) {
+        if (max(abs(dx), abs(dy)) !== rad) continue;
+        const nx = gx + dx,
+          ny = gy + dy;
+        if (nx < 0 || ny < 0 || nx >= vampGridW || ny >= vampGridH) continue;
+        if (vampFree[ny * vampGridW + nx]) return ny * vampGridW + nx;
+      }
+    }
+  }
+  return -1;
+}
+
+function findVampPath(fromX, fromY, toX, toY) {
+  if (!vampFree) return [];
+  const start = nearestFreeNode(fromX, fromY);
+  const goal = nearestFreeNode(toX, toY);
+  if (start < 0 || goal < 0) return [];
+
+  const n = vampGridW * vampGridH;
+  const prev = new Int32Array(n).fill(-1);
+  const queue = new Int32Array(n);
+  let head = 0,
+    tail = 0,
+    found = false;
+  queue[tail++] = start;
+  prev[start] = start;
+
+  while (head < tail) {
+    const cur = queue[head++];
+    if (cur === goal) {
+      found = true;
+      break;
+    }
+    const cx = cur % vampGridW;
+    const cy = (cur / vampGridW) | 0;
+    if (cx > 0) {
+      const k = cur - 1;
+      if (vampFree[k] && prev[k] === -1) { prev[k] = cur; queue[tail++] = k; }
+    }
+    if (cx < vampGridW - 1) {
+      const k = cur + 1;
+      if (vampFree[k] && prev[k] === -1) { prev[k] = cur; queue[tail++] = k; }
+    }
+    if (cy > 0) {
+      const k = cur - vampGridW;
+      if (vampFree[k] && prev[k] === -1) { prev[k] = cur; queue[tail++] = k; }
+    }
+    if (cy < vampGridH - 1) {
+      const k = cur + vampGridW;
+      if (vampFree[k] && prev[k] === -1) { prev[k] = cur; queue[tail++] = k; }
+    }
+  }
+  if (!found) return [];
+
+  const path = [];
+  let cur = goal;
+  while (cur !== start) {
+    path.push({
+      x: (cur % vampGridW) * VAMP_GRID + VAMP_GRID / 2,
+      y: ((cur / vampGridW) | 0) * VAMP_GRID + VAMP_GRID / 2,
+    });
+    cur = prev[cur];
+  }
+  return path.reverse();
+}
+
+function huntPlayer() {
+  const step = PLAYER_SPEED * 0.7;
+
+  // With nothing in the way it just walks at you, which looks better than
+  // stepping between tile centres across an open room.
+  if (hasClearLine(vampire.x, vampire.y, player.x, player.y)) {
+    vampPath = [];
+    const dx = player.x - vampire.x,
+      dy = player.y - vampire.y;
+    const d = sqrt(dx * dx + dy * dy);
+    if (d > 0) moveVampire((dx / d) * step, (dy / d) * step);
+    return;
+  }
+
+  // Otherwise follow the route. Repath on the timer, and immediately if the
+  // route has run out — without that it beelines into a wall and sticks there.
+  const now = millis();
+  if (now >= vampRepathAt || !vampPath.length) {
+    vampPath = findVampPath(vampire.x, vampire.y, player.x, player.y);
+    vampRepathAt = now + VAMP_REPATH_MS;
+  }
+  while (
+    vampPath.length &&
+    dist(vampire.x, vampire.y, vampPath[0].x, vampPath[0].y) < VAMP_GRID * 0.6
+  ) {
+    vampPath.shift();
+  }
+  if (!vampPath.length) return;
+
+  const dx = vampPath[0].x - vampire.x,
+    dy = vampPath[0].y - vampire.y;
+  const d = sqrt(dx * dx + dy * dy);
+  if (d > 0) moveVampire((dx / d) * step, (dy / d) * step);
+}
+
+function hasClearLine(x1, y1, x2, y2) {
+  for (let wall of walls) {
+    if (isLineRectIntersecting(x1, y1, x2, y2, wall)) return false;
+  }
+  return true;
+}
+
+// Axis-separated like the player's own movement, so it slides along a wall
+// rather than sticking to it.
+function moveVampire(dx, dy) {
+  if (!collidesWithWalls(vampire.x + dx, vampire.y, vampire.r)) vampire.x += dx;
+  if (!collidesWithWalls(vampire.x, vampire.y + dy, vampire.r)) vampire.y += dy;
+  vampire.x = constrain(vampire.x, vampire.r, worldW - vampire.r);
+  vampire.y = constrain(vampire.y, vampire.r, worldH - vampire.r);
 }
 
 function checkVampireCatch() {
