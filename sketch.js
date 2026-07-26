@@ -500,11 +500,31 @@ function updateMovementAudio() {
 // ---------------------------------------------------------------------
 //  LEVEL SETUP
 // ---------------------------------------------------------------------
+// The tutorial room is built in code rather than from a map, so its geometry
+// lives here and every pass reads the same description. initTutorial(),
+// drawTutorialRoom() and drawLitWalls() each used to carry their own copy, and
+// the copies drifted: the renderer skipped one tile more than the collision did,
+// which left an unpainted hole in the wall directly under the doorway.
+const TUT_X = 100,
+  TUT_Y = 140;
+const TUT_COLS = 15,
+  TUT_ROWS = 13;
+const TUT_DOOR_ROW = 5,
+  TUT_DOOR_TILES = 2;
+
+function tutorialWallAt(c, r) {
+  if (r < 0 || r >= TUT_ROWS || c < 0 || c >= TUT_COLS) return false;
+  // The doorway out, a two-tile gap in the right-hand wall.
+  if (c === TUT_COLS - 1)
+    return !(r >= TUT_DOOR_ROW && r < TUT_DOOR_ROW + TUT_DOOR_TILES);
+  return r === 0 || r === TUT_ROWS - 1 || c === 0;
+}
+
 function initTutorial() {
-  const rx = 100,
-    ry = 140;
-  const cols = 15,
-    rows = 13;
+  const rx = TUT_X,
+    ry = TUT_Y;
+  const cols = TUT_COLS,
+    rows = TUT_ROWS;
 
   player = {
     x: rx + 2 * TILE_SIZE + TILE_SIZE / 2,
@@ -523,10 +543,7 @@ function initTutorial() {
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      let isWall = row === 0 || row === rows - 1 || col === 0;
-      let isDoorOpening = col === cols - 1 && row >= 5 && row <= 6;
-      if (col === cols - 1 && !isDoorOpening) isWall = true;
-      if (isWall) {
+      if (tutorialWallAt(col, row)) {
         walls.push({
           x: rx + col * TILE_SIZE,
           y: ry + row * TILE_SIZE,
@@ -547,9 +564,9 @@ function initTutorial() {
   // of the two leaves is exactly one 32x32 texture drawn square.
   door = {
     x: rx + (cols - 1) * TILE_SIZE,
-    y: ry + 5 * TILE_SIZE,
+    y: ry + TUT_DOOR_ROW * TILE_SIZE,
     w: TILE_SIZE,
-    h: 2 * TILE_SIZE,
+    h: TUT_DOOR_TILES * TILE_SIZE,
     isOpen: false,
   };
 
@@ -785,6 +802,7 @@ function draw() {
     // Entities above fog
     push();
     translate(-camera.x + shakeX, -camera.y + shakeY);
+    drawLitWalls();
     drawDoor();
     drawFurniture();
     drawPlayer();
@@ -1438,33 +1456,9 @@ function drawRoom() {
       if (tileFloorImg) image(tileFloorImg, x, y, TILE_SIZE, TILE_SIZE);
 
       let ch = line[col] || ".";
-      let rotationAngle = 0;
-      let isWall = false,
-        isCorner = false;
 
-      if (ch === "L" || ch === "B" || ch === "R" || ch === "U") {
-        isWall = true;
-        if (ch === "L") rotationAngle = 0;
-        else if (ch === "U") rotationAngle = HALF_PI;
-        else if (ch === "R") rotationAngle = PI;
-        else if (ch === "B") rotationAngle = PI + HALF_PI;
-      } else if (ch === "N" || ch === "E" || ch === "S" || ch === "W") {
-        isCorner = true;
-        if (ch === "N") rotationAngle = 0;
-        else if (ch === "E") rotationAngle = HALF_PI;
-        else if (ch === "S") rotationAngle = PI;
-        else if (ch === "W") rotationAngle = PI + HALF_PI;
-      } else if (ch === "C") {
-        isCorner = true;
-        rotationAngle = 0;
-      }
-
-      if (ch === "@") {
-        drawAutoWall(col, row, x, y);
-      } else if (isWall) {
-        drawTile(tileWallImg, x, y, rotationAngle, color(100, 100, 170));
-      } else if (isCorner) {
-        drawTile(tileCornerImg, x, y, rotationAngle, color(140, 120, 200));
+      if (drawWallTile(ch, col, row, x, y)) {
+        // walls and the gate — drawLitWalls() redraws these lit
       } else if (ch === ",") {
         drawTile(cyMossImg, x, y, 0, color(70, 96, 52));
       } else if (ch === "i") {
@@ -1680,6 +1674,88 @@ function drawAutoWall(col, row, x, y) {
   drawTile(p.img, x, y, p.rot, color(100, 100, 170));
 }
 
+function drawTutorialWall(col, row, x, y) {
+  const p = autoWallPiece(
+    tutorialWallAt(col, row - 1),
+    tutorialWallAt(col + 1, row),
+    tutorialWallAt(col, row + 1),
+    tutorialWallAt(col - 1, row),
+  );
+  drawTile(p.img, x, y, p.rot, color(100, 100, 170));
+}
+
+// Paint whichever wall piece a map character calls for. Shared by drawRoom(),
+// which lays the walls down under the darkness, and drawLitWalls(), which
+// repaints the ones the beam is on. Returns false for anything that is not a
+// wall so callers can fall through to the floor and scenery cases.
+function drawWallTile(ch, col, row, x, y) {
+  if (ch === "@") {
+    drawAutoWall(col, row, x, y);
+    return true;
+  }
+  // The courtyard still uses the older explicit pieces: L/R/U/B are straights
+  // and N/E/S/W are corners, each naming its own rotation. C is a legacy alias.
+  const straight = { L: 0, U: HALF_PI, R: PI, B: PI + HALF_PI };
+  const corner = { N: 0, E: HALF_PI, S: PI, W: PI + HALF_PI, C: 0 };
+  if (ch in straight) {
+    drawTile(tileWallImg, x, y, straight[ch], color(100, 100, 170));
+    return true;
+  }
+  if (ch in corner) {
+    drawTile(tileCornerImg, x, y, corner[ch], color(140, 120, 200));
+    return true;
+  }
+  if (ch === "X") {
+    drawTile(gateImg, x, y, 0, color(90, 58, 30));
+    return true;
+  }
+  return false;
+}
+
+// The lit pass over walls, and the counterpart of drawFurniture().
+//
+// drawRoom() and drawTutorialRoom() lay the walls down before drawFog(), so the
+// darkness overlay paints straight over them and a wall the player is staring
+// at renders as flat black — indistinguishable from a hole in the world. That
+// is what made the tutorial doorway look like it had a gap beneath it: the door
+// draws its own glow above the fog, so it hung lit in an unlit wall.
+//
+// isInFlashlight() is given the tile as excludeWall for the same reason
+// drawFurniture() does it: a solid tile occludes its own centre, so without the
+// escape hatch no wall could ever light itself.
+function drawLitWalls() {
+  if (!lightOn) return;
+
+  if (gameState === "tutorial") {
+    for (let row = 0; row < TUT_ROWS; row++) {
+      for (let col = 0; col < TUT_COLS; col++) {
+        if (!tutorialWallAt(col, row)) continue;
+        const x = TUT_X + col * TILE_SIZE;
+        const y = TUT_Y + row * TILE_SIZE;
+        if (!isInFlashlight(x + TILE_SIZE / 2, y + TILE_SIZE / 2, { x, y }))
+          continue;
+        drawTutorialWall(col, row, x, y);
+      }
+    }
+    return;
+  }
+
+  if (!(tileMapData && tileMapData.tiles)) return;
+  const v = visibleTiles();
+  for (let row = v.r0; row <= v.r1; row++) {
+    const line = tileMapData.tiles[row] || "";
+    for (let col = v.c0; col <= v.c1; col++) {
+      const ch = line[col] || ".";
+      if (SOLID_CHARS.indexOf(ch) === -1) continue;
+      const x = col * TILE_SIZE;
+      const y = row * TILE_SIZE;
+      if (!isInFlashlight(x + TILE_SIZE / 2, y + TILE_SIZE / 2, { x, y }))
+        continue;
+      drawWallTile(ch, col, row, x, y);
+    }
+  }
+}
+
 function drawTile(img, x, y, rotationAngle, fallback) {
   push();
   translate(x + TILE_SIZE / 2, y + TILE_SIZE / 2);
@@ -1695,37 +1771,12 @@ function drawTile(img, x, y, rotationAngle, fallback) {
 }
 
 function drawTutorialRoom() {
-  const rx = 100,
-    ry = 140;
-  const cols = 15,
-    rows = 13;
-
-  // Same wall test the layout above is built from, so the auto-tiler can ask
-  // about neighbours that fall outside the room.
-  const wallAt = (c, r) => {
-    if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
-    // The doorway out. Must match the opening initTutorial() leaves in the
-    // collision walls exactly — the door is two tiles tall at rows 5 and 6, so
-    // row 7 is solid wall. Skipping it here too left a hole under the door.
-    if (c === cols - 1) return !(r >= 5 && r <= 6);
-    return r === 0 || r === rows - 1 || c === 0;
-  };
-
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      let x = rx + col * TILE_SIZE;
-      let y = ry + row * TILE_SIZE;
+  for (let row = 0; row < TUT_ROWS; row++) {
+    for (let col = 0; col < TUT_COLS; col++) {
+      let x = TUT_X + col * TILE_SIZE;
+      let y = TUT_Y + row * TILE_SIZE;
       if (tileFloorImg) image(tileFloorImg, x, y, TILE_SIZE, TILE_SIZE);
-
-      if (wallAt(col, row)) {
-        const p = autoWallPiece(
-          wallAt(col, row - 1),
-          wallAt(col + 1, row),
-          wallAt(col, row + 1),
-          wallAt(col - 1, row),
-        );
-        drawTile(p.img, x, y, p.rot, color(100, 100, 170));
-      }
+      if (tutorialWallAt(col, row)) drawTutorialWall(col, row, x, y);
     }
   }
   for (let tbl of tables)
