@@ -1802,7 +1802,48 @@ function drawKey() {
   pop();
 }
 
+// The exit is drawn above the darkness on purpose, so it reads as a beacon from
+// across the room. On its own that left it hanging lit inside an unlit wall, and
+// the blackness where the wall should be looked like a hole beneath the door.
+// So the doorframe is lit with it: the wall tiles flanking the opening are
+// painted whenever the door is, whether or not the beam is on them. The exit
+// then reads as a door set into a wall instead of a door floating in a void.
+function drawDoorFrame() {
+  if (!door) return;
+  const tall = max(1, round(door.h / TILE_SIZE));
+
+  if (gameState === "tutorial") {
+    const dc = round((door.x - TUT_X) / TILE_SIZE);
+    const dr = round((door.y - TUT_Y) / TILE_SIZE);
+    for (let col = dc - 1; col <= dc + 1; col++) {
+      for (let row = dr - 1; row <= dr + tall; row++) {
+        if (!tutorialWallAt(col, row)) continue;
+        drawTutorialWall(
+          col,
+          row,
+          TUT_X + col * TILE_SIZE,
+          TUT_Y + row * TILE_SIZE,
+        );
+      }
+    }
+    return;
+  }
+
+  if (!(tileMapData && tileMapData.tiles)) return;
+  const dc = floor(door.x / TILE_SIZE);
+  const dr = floor(door.y / TILE_SIZE);
+  for (let col = dc - 1; col <= dc + 1; col++) {
+    for (let row = dr - 1; row <= dr + tall; row++) {
+      const ch = (tileMapData.tiles[row] || "")[col];
+      if (!ch || SOLID_CHARS.indexOf(ch) === -1) continue;
+      drawWallTile(ch, col, row, col * TILE_SIZE, row * TILE_SIZE);
+    }
+  }
+}
+
 function drawDoor() {
+  drawDoorFrame();
+
   push();
   let pulse = 0.5 + 0.5 * sin(millis() / 300);
 
