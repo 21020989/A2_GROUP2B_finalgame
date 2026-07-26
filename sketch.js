@@ -60,6 +60,9 @@ let wallVerticalImg, wallHorizontalImg, wallCornerImg, wallTeeImg, wallPlusImg;
 let doorLeafImg;
 
 // Level 2 — the overgrown courtyard.
+let streetMapData;
+let roadAsphaltImg, roadDashImg, roadEdgeImg, kerbImg;
+let vergeImg, vergeTuftImg, roadBushImg, roadTreeImg, roadDirtImg, streetLampImg;
 let courtyardMapData, cyFloorImg, cyWallImg, cyCornerImg;
 let cyMossImg, cyIvyImg, hedgeImg, flowerBushImg;
 let poolImg, wellImg, crateImg, gateImg, puddleImg;
@@ -69,7 +72,8 @@ let currentLevel = 0;
 // Every character that blocks movement and casts a flashlight shadow.
 // Mansion: walls, corners, tables, sign. Courtyard: hedges, water, the well,
 // crates, the boarded gate.
-const SOLID_CHARS = "LRUBNESWCTDG@#%~opqvkX";
+// b/t/l are the street's bush, tree and lamp post.
+const SOLID_CHARS = "LRUBNESWCTDG@#%~opqvkXbtl";
 
 // Walkable, but standing on one ends the run. Kept separate from SOLID_CHARS
 // because a puddle has to let you in — that's the whole point of it.
@@ -242,8 +246,21 @@ function preload() {
   crateImg = loadTile("crate");
   gateImg = loadTile("gate");
 
+  // Street (level 3). streetlamp.png is a placeholder for the group's own art.
+  roadAsphaltImg = loadTile("roadasphalt");
+  roadDashImg = loadTile("roaddash");
+  roadEdgeImg = loadTile("roadedge");
+  kerbImg = loadTile("kerb");
+  vergeImg = loadTile("verge");
+  vergeTuftImg = loadTile("vergetuft");
+  roadBushImg = loadTile("roadbush");
+  roadTreeImg = loadTile("roadtree");
+  roadDirtImg = loadTile("roaddirt");
+  streetLampImg = loadTile("streetlamp");
+
   mansionMapData = loadJSON("data/blocks.json");
   courtyardMapData = loadJSON("data/courtyard.json");
+  streetMapData = loadJSON("data/street.json");
 }
 
 // Both levels share the same tile-map format; only the art and the layout
@@ -262,6 +279,16 @@ const LEVELS = [
     floor: () => cyFloorImg,
     wall: () => cyWallImg,
     corner: () => cyCornerImg,
+  },
+  {
+    // The road out. Its boundary is the treeline rather than a built wall, so
+    // wall/corner point at the tree tile — the street map never uses the
+    // L/R/U/B or N/E/S/W pieces those slots exist for.
+    name: "The Street",
+    data: () => streetMapData,
+    floor: () => vergeImg,
+    wall: () => roadTreeImg,
+    corner: () => roadTreeImg,
   },
 ];
 
@@ -710,6 +737,7 @@ function initGame(level) {
   vampPath = [];
   vampRepathAt = 0;
   buildVampGrid();
+  buildLamps();
   gameState = "play";
 }
 
@@ -813,6 +841,7 @@ function draw() {
         checkPuddleSlip();
       }
       updateVampire();
+      updateLamps();
       checkKeyPickup();
       checkWinCondition();
       checkVampireCatch();
@@ -839,6 +868,7 @@ function draw() {
     push();
     translate(-camera.x + shakeX, -camera.y + shakeY);
     drawLitWalls();
+    drawLamps();
     drawDoor();
     drawFurniture();
     drawPlayer();
@@ -1107,6 +1137,119 @@ function circleRectCollision(cx, cy, cr, rx, ry, rw, rh) {
 }
 
 // ---------------------------------------------------------------------
+//  STREETLAMPS  (level 3)
+// ---------------------------------------------------------------------
+// The only shelter on the road. The vampire will not walk into lamplight, so
+// standing under a lamp makes you untouchable — but the lamp starts dying the
+// moment you step into it, and once it is out it stays out. They are stepping
+// stones across the level, not a fort to camp in, which is the whole point:
+// you have to decide when to spend one.
+//
+// Nothing here is level-specific in code; a lamp is simply an 'l' in the map,
+// so any later level can use them.
+const LAMP_RADIUS = 92; // pool of light, world px
+const LAMP_BURN_MS = 4200; // how long a lamp lasts once you step under it
+const LAMP_FADE_MS = 1100; // the guttering at the end of that
+
+let lamps = [];
+
+function buildLamps() {
+  lamps = [];
+  if (!(tileMapData && tileMapData.tiles)) return;
+  for (let row = 0; row < mapRows; row++) {
+    const line = tileMapData.tiles[row] || "";
+    for (let col = 0; col < mapCols; col++) {
+      if (line[col] !== "l") continue;
+      lamps.push({
+        x: col * TILE_SIZE + TILE_SIZE / 2,
+        y: row * TILE_SIZE + TILE_SIZE / 2,
+        state: "lit", // "lit" | "dying" | "dead"
+        diesAt: 0,
+      });
+    }
+  }
+}
+
+function updateLamps() {
+  const now = millis();
+  for (const L of lamps) {
+    if (L.state === "dead") continue;
+    if (L.state === "lit" && lampCovers(L, player.x, player.y)) {
+      L.state = "dying";
+      L.diesAt = now + LAMP_BURN_MS;
+    }
+    if (L.state === "dying" && now >= L.diesAt) L.state = "dead";
+  }
+}
+
+function lampCovers(L, x, y) {
+  return dist(x, y, L.x, L.y) < LAMP_RADIUS;
+}
+
+// The lamp currently sheltering the player, if any. Drives the HUD readout.
+function playerShelter() {
+  for (const L of lamps) {
+    if (L.state !== "dead" && lampCovers(L, player.x, player.y)) return L;
+  }
+  return null;
+}
+
+// Would this position put the vampire in lamplight? Moving further in is
+// refused, moving out is always allowed — otherwise a lamp coming on top of it
+// would pin it in place forever.
+function vampLightBlocked(x, y) {
+  for (const L of lamps) {
+    if (L.state === "dead") continue;
+    const to = dist(x, y, L.x, L.y);
+    if (to >= LAMP_RADIUS) continue;
+    const from = dist(vampire.x, vampire.y, L.x, L.y);
+    if (from >= LAMP_RADIUS || to < from) return true;
+  }
+  return false;
+}
+
+// Drawn above the darkness, like the exit, so a live lamp reads as a beacon
+// from across the level. That visibility is the mechanic: you need to be able
+// to see which shelter is still burning before you commit to running for it.
+function drawLamps() {
+  if (!lamps.length) return;
+  const ctx = drawingContext;
+  for (const L of lamps) {
+    if (L.state === "dead") continue;
+
+    let k = 1;
+    if (L.state === "dying") {
+      const left = L.diesAt - millis();
+      if (left < LAMP_FADE_MS) {
+        k = max(0, left / LAMP_FADE_MS);
+        // irregular dips, so a failing lamp is legible at a glance
+        k *= 0.5 + 0.5 * noise(millis() / 70 + L.x * 0.05);
+      }
+    }
+    if (k <= 0.01) continue;
+
+    const grad = ctx.createRadialGradient(L.x, L.y, 0, L.x, L.y, LAMP_RADIUS);
+    grad.addColorStop(0, `rgba(255,216,150,${0.44 * k})`);
+    grad.addColorStop(0.5, `rgba(255,190,110,${0.2 * k})`);
+    grad.addColorStop(1, "rgba(255,170,90,0)");
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(L.x, L.y, LAMP_RADIUS, 0, TWO_PI);
+    ctx.fill();
+    ctx.restore();
+
+    // the post itself, so a lit lamp is visible without the flashlight on it
+    push();
+    tint(255, 255 * (0.55 + 0.45 * k));
+    drawTile(streetLampImg, L.x - TILE_SIZE / 2, L.y - TILE_SIZE / 2, 0,
+             color(70, 74, 82));
+    pop();
+    noTint();
+  }
+}
+
+// ---------------------------------------------------------------------
 //  KEY / WIN / VAMPIRE
 // ---------------------------------------------------------------------
 function checkKeyPickup() {
@@ -1163,6 +1306,7 @@ function updateVampire() {
 // the player does, following a breadth-first path over the tile grid so it
 // still rounds corners and comes through doorways instead of pressing itself
 // against the far side of a wall.
+const DEFAULT_VAMP_SPEED = 0.7;
 const VAMP_REPATH_MS = 220;
 let vampPath = [];
 let vampRepathAt = 0;
@@ -1293,7 +1437,13 @@ function findVampPath(fromX, fromY, toX, toY) {
 }
 
 function huntPlayer() {
-  const step = PLAYER_SPEED * 0.7;
+  // Per level, out of the map JSON. The mansion and courtyard leave it at 0.7 —
+  // slower than the player, so distance is a real defence. The street sets it
+  // above 1.0: you cannot outrun it there, which is what forces you onto the
+  // streetlamps instead of simply running for the exit.
+  const mul =
+    (tileMapData && tileMapData.vampireSpeed) || DEFAULT_VAMP_SPEED;
+  const step = PLAYER_SPEED * mul;
 
   // With nothing in the way it just walks at you, which looks better than
   // stepping between tile centres across an open room.
@@ -1337,8 +1487,20 @@ function hasClearLine(x1, y1, x2, y2) {
 // Axis-separated like the player's own movement, so it slides along a wall
 // rather than sticking to it.
 function moveVampire(dx, dy) {
-  if (!collidesWithWalls(vampire.x + dx, vampire.y, vampire.r)) vampire.x += dx;
-  if (!collidesWithWalls(vampire.x, vampire.y + dy, vampire.r)) vampire.y += dy;
+  // Lamplight blocks it exactly the way a wall does, and per axis for the same
+  // reason: refusing the whole move would stop it dead at the edge of a pool,
+  // where letting each axis through separately slides it around the rim. That
+  // circling is what makes a lamp read as shelter rather than as a wall.
+  if (
+    !collidesWithWalls(vampire.x + dx, vampire.y, vampire.r) &&
+    !vampLightBlocked(vampire.x + dx, vampire.y)
+  )
+    vampire.x += dx;
+  if (
+    !collidesWithWalls(vampire.x, vampire.y + dy, vampire.r) &&
+    !vampLightBlocked(vampire.x, vampire.y + dy)
+  )
+    vampire.y += dy;
   vampire.x = constrain(vampire.x, vampire.r, worldW - vampire.r);
   vampire.y = constrain(vampire.y, vampire.r, worldH - vampire.r);
 }
@@ -1508,6 +1670,21 @@ function drawRoom() {
         drawTile(cyMossImg, x, y, 0, color(70, 96, 52));
       } else if (ch === "i") {
         drawTile(cyIvyImg, x, y, 0, color(52, 92, 44));
+      } else if (ch === "a") {
+        drawTile(roadAsphaltImg, x, y, 0, color(56, 58, 66));
+      } else if (ch === "d") {
+        drawTile(roadDashImg, x, y, 0, color(56, 58, 66));
+      } else if (ch === "e") {
+        drawTile(roadEdgeImg, x, y, 0, color(56, 58, 66));
+      } else if (ch === "n") {
+        // the same edge tile turned end for end, for the far side of the road
+        drawTile(roadEdgeImg, x, y, PI, color(56, 58, 66));
+      } else if (ch === "c") {
+        drawTile(kerbImg, x, y, 0, color(88, 90, 96));
+      } else if (ch === "f") {
+        drawTile(vergeTuftImg, x, y, 0, color(46, 76, 44));
+      } else if (ch === "r") {
+        drawTile(roadDirtImg, x, y, 0, color(68, 54, 40));
       } else if (ch === "*") {
         // Rotated per-tile so a scattering of puddles doesn't look stamped.
         drawTile(
@@ -1632,7 +1809,7 @@ function drawFurniture() {
       let y = row * TILE_SIZE;
       let ch = line[col] || ".";
 
-      if ("TDHGk#%~opqv".indexOf(ch) === -1) continue;
+      if ("TDHGk#%~opqvtbl".indexOf(ch) === -1) continue;
 
       if (!isInFlashlight(x + TILE_SIZE / 2, y + TILE_SIZE / 2, { x, y }))
         continue;
@@ -1668,6 +1845,11 @@ function drawPropTile(ch, x, y) {
   else if (ch === "q") drawTile(wellImg, x, y, PI, color(120, 124, 120));
   else if (ch === "v")
     drawTile(wellImg, x, y, PI + HALF_PI, color(120, 124, 120));
+  // Street scenery. The treeline is the level boundary rather than a built
+  // wall, so it lives here with the rest of the solid props.
+  else if (ch === "t") drawTile(roadTreeImg, x, y, 0, color(26, 48, 30));
+  else if (ch === "b") drawTile(roadBushImg, x, y, 0, color(34, 62, 38));
+  else if (ch === "l") drawTile(streetLampImg, x, y, 0, color(70, 74, 82));
   else return false;
   return true;
 }
@@ -1881,7 +2063,11 @@ function drawDoorFrame() {
     for (let row = dr - 1; row <= dr + tall; row++) {
       const ch = (tileMapData.tiles[row] || "")[col];
       if (!ch || SOLID_CHARS.indexOf(ch) === -1) continue;
-      drawWallTile(ch, col, row, col * TILE_SIZE, row * TILE_SIZE);
+      const x = col * TILE_SIZE;
+      const y = row * TILE_SIZE;
+      // Built walls first; on the street the doorway is cut through the
+      // treeline, which is scenery rather than a wall piece.
+      if (!drawWallTile(ch, col, row, x, y)) drawPropTile(ch, x, y);
     }
   }
 }

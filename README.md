@@ -10,7 +10,7 @@ Our prototype relies on an interactive loop tying action, feedback, player decis
 
 ## Levels
 
-The escape now runs across two stages, and clearing the first only moves you outdoors rather than ending the run.
+The escape now runs across three stages, and clearing one only moves you further out rather than ending the run: out of the house, through the grounds, and finally onto the road.
 
 Level 1 — The Mansion. The interior, laid out in `data/blocks.json`, follows the hand-annotated floor plan our group drew over a reference screenshot. Seven rooms sit in three bands. West: the player starts in the tall north-west room, with the West Library directly below it. Centre: the North Sitting Room runs along the top, the Central Grand Foyer and its rug sit in the middle, and the South Dining Hall fills the bottom. East: a small exit vestibule holds the locked door on the east wall, and the Key Hall runs beneath it.
 
@@ -27,7 +27,17 @@ This is what the level is really about. Indoors the only thing worth looking at 
 
 To keep it fair rather than arbitrary, a puddle triggers on the tile under the player's centre rather than anywhere the hitbox touches, so deliberately skirting the edge of one works. The key is also never placed on a puddle or anywhere only reachable by crossing one, so no run is unwinnable.
 
-Both levels use the same tile-map format, so `drawRoom()` and `initGame()` are level-agnostic; `LEVELS` in `sketch.js` just points each stage at its own JSON and its own floor/wall/corner images.
+Level 3 — The Street. Stepping through the courtyard's gate puts you on the road out of town, at night, laid out in `data/street.json`. It runs west to east in bands: treeline, verge, kerb, the carriageway with its broken centre line, kerb, verge, treeline. The treeline is the level boundary, and the gap in it at the eastern end is the way out. The whole palette is darkened and pushed toward blue against the daytime reference we worked from, so the road reads as lit only by the moon.
+
+Two things make it the hardest stage. The vampire is faster here — `vampireSpeed` in the level JSON raises it from 0.7 of the player's speed to 1.05, so for the first time you cannot simply outrun it. And the road is open: there are no corners to break line of sight the way the mansion's rooms and the courtyard's hedges allowed.
+
+What you get instead is the streetlamps. A lamp casts a pool of light the vampire will not walk into, so standing under one makes you untouchable — it circles the rim instead. But a lamp starts dying the moment you step under it, gutters for the last second or so, and once it is out it stays out. There are seven, alternating between the north and south kerbs, so the safe route zigzags across the carriageway rather than running straight down one verge. They are stepping stones, not a fort: the level is about choosing when to spend one.
+
+Because lamps are simply an `l` in the map and their pool is drawn above the darkness like the exit is, a live lamp is visible from across the level. That visibility is deliberate — you need to see which shelter is still burning before committing to a run for it.
+
+All three levels use the same tile-map format, so `drawRoom()` and `initGame()` are level-agnostic; `LEVELS` in `sketch.js` just points each stage at its own JSON and its own floor/wall/corner images.
+
+**One placeholder.** `assets/images/streetlamp.png` is a stand-in so the safe-zone mechanic could be built and tested. Our art subgroup is drawing the real one. The pool of light is drawn by the game rather than baked into the tile, so replacing the art changes nothing but the post itself.
 
 ## Setup and Interaction Instructions
 
@@ -80,11 +90,18 @@ Dynamic Furniture and Asset Population: To expand our layout complexity and impr
 | `assets/sounds/ringing.wav`     | Tinnitus ring for the knockout. Synthesised from scratch by `tools/make_ringing_sfx.py`, not sourced.  |
 | `assets/images/poolwater.png`, `crate.png`, `gate.png` | Reflecting pool, crate and boarded gate — original 32x32 assets drawn by our group. |
 | `data/courtyard.json`           | Level 2 tile layout, designed entirely by our group members.                                          |
+| `assets/images/roadasphalt.png`, `roaddash.png`, `roadedge.png`, `kerb.png` | Level 3 carriageway: tarmac, centre-line dash, edge line and kerb — original 32x32 assets drawn by our group. |
+| `assets/images/verge.png`, `vergetuft.png`, `roaddirt.png` | Night grass verge, tufted verge and bare dirt — original 32x32 assets drawn by our group. |
+| `assets/images/roadbush.png`, `roadtree.png` | Roadside bush and the treeline that walls the level in — original 32x32 assets drawn by our group. |
+| `assets/images/streetlamp.png`  | **PLACEHOLDER** — a stand-in so the safe-zone mechanic could be built and tested. Our group is drawing the final art. |
+| `assets/images/splash.png`      | Title-screen logo, drawn by our group; cropped and compressed for the web.                            |
+| `data/street.json`              | Level 3 tile layout, designed entirely by our group members.                                          |
 
-The courtyard tiles are generated by `tools/make_courtyard_tiles.py`, which draws each
-32x32 sprite pixel by pixel with Pillow. Run `python tools/make_courtyard_tiles.py` to
-rebuild them after editing the palette or a shape. The ground, hedge and water tiles are
-authored to wrap, so a field of them shows no repeating grid.
+The courtyard tiles are generated by `tools/make_courtyard_tiles.py`, and the street tiles
+by `tools/make_street_tiles.py`, each of which draws every 32x32 sprite pixel by pixel with
+Pillow. Run the relevant script to rebuild them after editing the palette or a shape. The
+ground, hedge, water, asphalt and treeline tiles are authored to wrap, so a field of them
+shows no repeating grid.
 
 ## References
 

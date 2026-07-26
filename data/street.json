@@ -1,0 +1,61 @@
+{
+  "legend": {
+    "note": "Street (level 3), at night. The road runs west to east. Walls are the treeline; the exit is the gap in the east treeline. Streetlamps ('l') are safe zones the vampire will not enter \u2014 see LAMP_* in sketch.js. streetlamp.png is a PLACEHOLDER for the group's own art.",
+    ".": "bare ground \u2014 walkable",
+    "a": "asphalt \u2014 walkable",
+    "d": "asphalt with a centre-line dash \u2014 walkable",
+    "e": "asphalt with the edge line, painted toward the top of the tile",
+    "n": "the same edge tile turned 180\u00b0, for the far side of the road",
+    "c": "kerb \u2014 walkable",
+    "g": "grass verge \u2014 walkable",
+    "f": "grass verge, tufted \u2014 walkable",
+    "r": "bare dirt \u2014 walkable",
+    "b": "bush \u2014 solid",
+    "t": "tree \u2014 solid, the level boundary",
+    "l": "streetlamp \u2014 solid post, and a safe zone that burns out once used"
+  },
+  "cols": 60,
+  "rows": 24,
+  "tileSize": 40,
+  "spawn": {
+    "x": 100,
+    "y": 480
+  },
+  "vampire": {
+    "x": 700,
+    "y": 480
+  },
+  "vampireSpeed": 1.05,
+  "door": {
+    "x": 2360,
+    "y": 440,
+    "w": 40,
+    "h": 80
+  },
+  "tiles": [
+    "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "tggggggbrgggggrbgggbgggbggbrfgbgggggbggbggbgggfgfgbgrgbggggt",
+    "tgfggfgggggggggfggrggfggggggggggggggggggggggggggrfgfggggggft",
+    "tfggggggfgggggfgggfgbgffgggggggggggggggfbffgggrbggggfggggrgt",
+    "tgggrgggggfggbgggggfggfgggbgggbgfgggrgfggggbfrfggggfggrbgggt",
+    "tgggggggggfggggrggggfgggggggggggfgggggrgggggggfgfggggffgfggt",
+    "tccccclccccccccccccccclccccccccccccccclccccccccccccccclcccct",
+    "teeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeet",
+    "taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaat",
+    "tdaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaa",
+    "taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaat",
+    "tnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnt",
+    "tccccccccccccclccccccccccccccclccccccccccccccclcccccccccccct",
+    "tgggfggggggggggggggggggggfgfgggggrgfgrfgggffgggfgggrfgfgfggt",
+    "tggggffgrfgfbgggbggggggggggfbgggggfggggggggggfgbfgffgggbgfgt",
+    "tggggggffgggggrggggggfgfggggfggggggfggggggggggggggfggfgggggt",
+    "tgffgfgggggrggfrggggggfggfgggggggfgrfgggffrgggggggffggrfgggt",
+    "tggggggbggggggffggfbggbggfgbggggfgbgfbfgggbggbgfbggbfgbgfggt",
+    "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+    "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+  ]
+}
