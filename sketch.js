@@ -1704,7 +1704,10 @@ function drawTutorialRoom() {
   // about neighbours that fall outside the room.
   const wallAt = (c, r) => {
     if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
-    if (c === cols - 1) return !(r >= 5 && r <= 7); // the doorway out
+    // The doorway out. Must match the opening initTutorial() leaves in the
+    // collision walls exactly — the door is two tiles tall at rows 5 and 6, so
+    // row 7 is solid wall. Skipping it here too left a hole under the door.
+    if (c === cols - 1) return !(r >= 5 && r <= 6);
     return r === 0 || r === rows - 1 || c === 0;
   };
 
