@@ -6,8 +6,13 @@
 
 const CANVAS_W = 800;
 const CANVAS_H = 800;
+// Default world size. The levels are different sizes, so initGame() overrides
+// these from whatever the loaded map actually covers — otherwise the smaller
+// level lets you walk off the edge of the tiles into undrawn space.
 const WORLD_W = 2000;
 const WORLD_H = 1000;
+let worldW = WORLD_W;
+let worldH = WORLD_H;
 const PLAYER_SPEED = 3.2;
 const PLAYER_RADIUS = 25;
 const FLASHLIGHT_DISTANCE = 300;
@@ -509,13 +514,17 @@ function initTutorial() {
   };
 
   camera = { x: 0, y: 0 };
+  // The tutorial room is built in code rather than from a map, so give it its
+  // own bounds: one canvas, no scrolling, with room to step out of the doorway.
+  worldW = 800;
+  worldH = 800;
   walls = [];
   tables = [];
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       let isWall = row === 0 || row === rows - 1 || col === 0;
-      let isDoorOpening = col === cols - 1 && row >= 5 && row <= 7;
+      let isDoorOpening = col === cols - 1 && row >= 5 && row <= 6;
       if (col === cols - 1 && !isDoorOpening) isWall = true;
       if (isWall) {
         walls.push({
@@ -534,11 +543,13 @@ function initTutorial() {
   walls.push({ x: tutTableX, y: tutTableY, w: TILE_SIZE, h: TILE_SIZE });
   tables.push({ x: tutTableX, y: tutTableY, w: TILE_SIZE, h: TILE_SIZE });
 
+  // Flush in the wall line: one tile thick, two tiles along the wall, so each
+  // of the two leaves is exactly one 32x32 texture drawn square.
   door = {
     x: rx + (cols - 1) * TILE_SIZE,
     y: ry + 5 * TILE_SIZE,
     w: TILE_SIZE,
-    h: 3 * TILE_SIZE,
+    h: 2 * TILE_SIZE,
     isOpen: false,
   };
 
@@ -574,13 +585,17 @@ function initGame(level) {
     mapRows = tileMapData.rows || mapRows;
   }
 
+  // The playable area is exactly what the map covers.
+  worldW = mapCols * TILE_SIZE;
+  worldH = mapRows * TILE_SIZE;
+
   // Original-map positions (JSON may override spawn/vampire/door).
   const spawn = (tileMapData && tileMapData.spawn) || { x: 200, y: 200 };
   const vampPos = (tileMapData && tileMapData.vampire) || { x: 1700, y: 1200 };
   const doorPos = (tileMapData && tileMapData.door) || {
-    x: WORLD_W - 80,
+    x: worldW - 3 * TILE_SIZE,
     y: 700,
-    w: 50,
+    w: 2 * TILE_SIZE,
     h: 200,
   };
 
@@ -690,7 +705,9 @@ function pickRandomKeyTile(spawnX, spawnY) {
   const candidates = reachable.filter(([c, r]) => {
     const cx = c * TILE_SIZE + TILE_SIZE / 2;
     const cy = r * TILE_SIZE + TILE_SIZE / 2;
-    return c < 47 && dist(cx, cy, spawnX, spawnY) > 350; // not in exit, not on top of you
+    // Keep clear of the exit — a key behind the locked door cannot be picked
+    // up, so the run would be unwinnable — and don't drop it in your lap.
+    return c < mapCols - 3 && dist(cx, cy, spawnX, spawnY) > 350;
   });
 
   const pool = candidates.length ? candidates : reachable;
@@ -797,8 +814,8 @@ function drawMinimap() {
   const minimapH = 140;
   const minimapX = margin;
   const minimapY = height - minimapH - margin;
-  const scaleX = minimapW / WORLD_W;
-  const scaleY = minimapH / WORLD_H;
+  const scaleX = minimapW / worldW;
+  const scaleY = minimapH / worldH;
 
   push();
   translate(minimapX, minimapY);
@@ -889,8 +906,9 @@ function computeShake() {
 }
 
 function updateCamera() {
-  let targetX = constrain(player.x - CANVAS_W / 2, 0, WORLD_W - CANVAS_W);
-  let targetY = constrain(player.y - CANVAS_H / 2, 0, WORLD_H - CANVAS_H);
+  // max() guards the case where a level is smaller than the canvas.
+  let targetX = constrain(player.x - CANVAS_W / 2, 0, max(0, worldW - CANVAS_W));
+  let targetY = constrain(player.y - CANVAS_H / 2, 0, max(0, worldH - CANVAS_H));
   camera.x = lerp(camera.x, targetX, CAM_SMOOTHING);
   camera.y = lerp(camera.y, targetY, CAM_SMOOTHING);
 }
@@ -964,8 +982,8 @@ function movePlayer(dx, dy) {
     player.y = nextY;
   }
 
-  player.x = constrain(player.x, player.r, WORLD_W - player.r);
-  player.y = constrain(player.y, player.r, WORLD_H - player.r);
+  player.x = constrain(player.x, player.r, worldW - player.r);
+  player.y = constrain(player.y, player.r, worldH - player.r);
 }
 
 function collidesWithWalls(cx, cy) {
@@ -1041,8 +1059,10 @@ function checkKeyPickup() {
 
 function checkWinCondition() {
   if (!player.hasKey || fadeActive) return;
+  // The door sits flush in the wall, so its far face is the edge of the world
+  // and nothing can get past it. Stepping into the doorway is the escape.
   if (
-    player.x > door.x + door.w &&
+    player.x > door.x &&
     player.y > door.y - player.r &&
     player.y < door.y + door.h + player.r
   ) {
@@ -2088,7 +2108,7 @@ function drawGameOverScreen() {
 function checkTutorialCompletion() {
   if (fadeActive || !player.hasKey) return;
   if (
-    player.x > door.x + door.w &&
+    player.x > door.x &&
     player.y > door.y - player.r &&
     player.y < door.y + door.h + player.r
   ) {

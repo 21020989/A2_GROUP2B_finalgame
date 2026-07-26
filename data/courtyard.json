@@ -1,10 +1,10 @@
 {
   "legend": {
     "note": "Courtyard (level 2). Edit tiles[] to change the layout. Each string is one row, left-to-right, exactly 50 chars.",
-    ".": "cobblestone \u2014 walkable",
-    ",": "mossy cobblestone \u2014 walkable",
-    "i": "ivy ground cover \u2014 walkable",
-    "*": "puddle \u2014 walkable, but stepping on one slips you and ends the run",
+    ".": "cobblestone \u00e2\u20ac\u201d walkable",
+    ",": "mossy cobblestone \u00e2\u20ac\u201d walkable",
+    "i": "ivy ground cover \u00e2\u20ac\u201d walkable",
+    "*": "puddle \u00e2\u20ac\u201d walkable, but stepping on one slips you and ends the run",
     "L": "stone wall, left side (0 rotation)",
     "R": "stone wall, right side (180)",
     "U": "stone wall, top edge (90)",
@@ -13,15 +13,15 @@
     "E": "stone corner, top-right (90)",
     "S": "stone corner, bottom-right (180)",
     "W": "stone corner, bottom-left (270)",
-    "X": "boarded gate set into the wall \u2014 solid, decorative",
-    "#": "hedge \u2014 solid",
-    "%": "flowering hedge \u2014 solid",
-    "~": "pool water \u2014 solid",
+    "X": "boarded gate set into the wall \u00e2\u20ac\u201d solid, decorative",
+    "#": "hedge \u00e2\u20ac\u201d solid",
+    "%": "flowering hedge \u00e2\u20ac\u201d solid",
+    "~": "pool water \u00e2\u20ac\u201d solid",
     "o": "well, top-left quarter (0)",
     "p": "well, top-right quarter (90)",
     "q": "well, bottom-right quarter (180)",
     "v": "well, bottom-left quarter (270)",
-    "k": "crate \u2014 solid"
+    "k": "crate \u00e2\u20ac\u201d solid"
   },
   "cols": 50,
   "rows": 24,
@@ -35,10 +35,10 @@
     "y": 200
   },
   "door": {
-    "x": 1920,
+    "x": 1960,
     "y": 680,
-    "w": 50,
-    "h": 200
+    "w": 40,
+    "h": 80
   },
   "tiles": [
     "NUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUE",
@@ -60,9 +60,9 @@
     "L.iiiiiiii#.............................#iiiii...R",
     "L.........#..........###%####%#.........%......*..",
     "L..#####..#..~~~~~............#.........#.........",
-    "L..#%###..%..~~~~~............%...................",
-    "L.*###%#..#..~~~~~.*.k........###%####......*.....",
-    "L........................*.....iiiiiii............",
+    "L..#%###..%..~~~~~............%..................R",
+    "L.*###%#..#..~~~~~.*.k........###%####......*....R",
+    "L........................*.....iiiiiii...........R",
     "L..................................*.............R",
     "WBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBS"
   ]
