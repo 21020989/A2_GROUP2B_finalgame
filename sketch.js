@@ -115,8 +115,13 @@ let killPos = null;
 // about a second and a half, which is plenty of time for something to reach
 // you. Short on purpose: it should read as a punishment, not a cutscene.
 const KO_MS = 1500;
+// You come round still lying in the puddle, so without a grace period the very
+// next frame knocks you straight back out and you can never walk clear. This is
+// long enough to get well off the tile at walking pace.
+const KO_GRACE_MS = 1600;
 let koActive = false;
 let koStart = 0;
+let koGraceUntil = 0;
 
 // ---------------------------------------------------------------------
 // Tiles are all 32x32 and get scaled to TILE_SIZE on draw, so every new
@@ -633,6 +638,7 @@ function initGame(level) {
 
   whisperVol = 0;
   koActive = false;
+  koGraceUntil = 0;
   gameState = "play";
 }
 
@@ -1088,7 +1094,8 @@ function checkVampireCatch() {
 // the player's centre — not on anything the hitbox merely brushes, so skirting
 // the edge of a puddle is a real option rather than a coin flip.
 function checkPuddleSlip() {
-  if (koActive || !(tileMapData && tileMapData.tiles)) return;
+  if (koActive || millis() < koGraceUntil) return;
+  if (!(tileMapData && tileMapData.tiles)) return;
   const col = floor(player.x / TILE_SIZE);
   const row = floor(player.y / TILE_SIZE);
   if (row < 0 || row >= mapRows || col < 0 || col >= mapCols) return;
@@ -1105,7 +1112,10 @@ function startKnockout() {
 // While he is out: no input, no flashlight, and the vampire keeps coming.
 // Handled here rather than in updatePlayer so the vampire still updates.
 function updateKnockout() {
-  if (koActive && millis() - koStart >= KO_MS) koActive = false;
+  if (koActive && millis() - koStart >= KO_MS) {
+    koActive = false;
+    koGraceUntil = millis() + KO_GRACE_MS;
+  }
 }
 
 // Blown-out white on impact, dropping to a haze he comes round from, with
