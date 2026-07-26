@@ -4,19 +4,18 @@
   box-sizing: border-box;
 }
 
+html,
 body {
-  background: radial-gradient(circle at top, #2b3a54, #08101a 70%);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
+  height: 100%;
   margin: 0;
+  background: #000;
+  /* The canvas is sized to the window, so any scrollbar would shrink the
+     viewport and trigger another resize. Keep the page from scrolling at all. */
+  overflow: hidden;
 }
 
 canvas {
   display: block;
-  border: 4px solid #222;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
 }
 
 /* Forces the browser to load the title fonts before the canvas draws them */

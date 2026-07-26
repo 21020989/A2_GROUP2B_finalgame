@@ -4,8 +4,11 @@
 //  only grows audible as it closes in.
 // =====================================================================
 
-const CANVAS_W = 800;
-const CANVAS_H = 800;
+// The canvas now fills the window (see setup / windowResized). These remain as
+// the resolution the game was designed and tuned at — the tutorial room and the
+// UI spacing were laid out against them — but nothing sizes the canvas by them.
+const DESIGN_W = 800;
+const DESIGN_H = 800;
 // Default world size. The levels are different sizes, so initGame() overrides
 // these from whatever the loaded map actually covers — otherwise the smaller
 // level lets you walk off the edge of the tiles into undrawn space.
@@ -33,6 +36,9 @@ let fogLayer;
 let vampire;
 let vampireImg, playerImg, keyImg, tableImg, deathImg, doorImg;
 let dotImg;
+let splashImg;
+// millis() at the moment the title screen began, so its reveal can be timed.
+let startAnimAt = 0;
 let dinnertableImg, chairbackImg, signImg;
 let carpetCornerImg, carpetMiddleImg, carpetTopImg;
 let shakeX = 0,
@@ -186,6 +192,11 @@ function preload() {
     () => {},
     () => {},
   );
+  splashImg = loadImage(
+    "assets/images/splash.png",
+    () => {},
+    () => {},
+  );
   dinnertableImg = loadImage(
     "assets/images/dinnertable.png",
     () => {},
@@ -254,9 +265,26 @@ const LEVELS = [
   },
 ];
 
+// A browser can report a zero-sized window — a hidden or backgrounded tab does
+// it — and a 0x0 canvas is an unrecoverable black screen, since nothing would
+// ever draw to prompt a resize. The floor here only has to be non-degenerate,
+// NOT the design size: forcing 800 would make the canvas taller than a short
+// window, and with the page set to overflow:hidden the bottom would simply be
+// unreachable. A later resize event corrects things once the window is real.
+function viewportW() {
+  return max(windowWidth, 320);
+}
+function viewportH() {
+  return max(windowHeight, 240);
+}
+
 function setup() {
-  createCanvas(CANVAS_W, CANVAS_H);
-  fogLayer = createGraphics(CANVAS_W, CANVAS_H);
+  // Fullscreen: the canvas is the window, and everything that used to assume a
+  // fixed 800x800 now reads width/height. The world itself is still drawn at
+  // 1:1, so a bigger window simply shows more of the level — the flashlight
+  // cone, not the viewport, is what limits what the player can actually see.
+  createCanvas(viewportW(), viewportH());
+  fogLayer = createGraphics(width, height);
   textFont("monospace");
   noCursor();
   camera = { x: 0, y: 0 };
@@ -275,6 +303,14 @@ function setup() {
   nextFlickerAt = millis() + random(8000, 16000);
 
   gameState = "start";
+  startAnimAt = millis();
+}
+
+// Follow the window. The fog buffer is a full-canvas overlay, so it has to be
+// rebuilt at the new size or the darkness stops covering the screen.
+function windowResized() {
+  resizeCanvas(viewportW(), viewportH());
+  fogLayer = createGraphics(width, height);
 }
 
 // ---------------------------------------------------------------------
@@ -928,8 +964,17 @@ function computeShake() {
 
 function updateCamera() {
   // max() guards the case where a level is smaller than the canvas.
-  let targetX = constrain(player.x - CANVAS_W / 2, 0, max(0, worldW - CANVAS_W));
-  let targetY = constrain(player.y - CANVAS_H / 2, 0, max(0, worldH - CANVAS_H));
+  // A window wider than the level would otherwise pin it to the top-left and
+  // leave the dead space on one side; centre the world instead. The negative
+  // camera value is what shifts it right, since drawing translates by -camera.
+  let targetX =
+    worldW <= width
+      ? -(width - worldW) / 2
+      : constrain(player.x - width / 2, 0, worldW - width);
+  let targetY =
+    worldH <= height
+      ? -(height - worldH) / 2
+      : constrain(player.y - height / 2, 0, worldH - height);
   camera.x = lerp(camera.x, targetX, CAM_SMOOTHING);
   camera.y = lerp(camera.y, targetY, CAM_SMOOTHING);
 }
@@ -1438,9 +1483,9 @@ function visibleTiles() {
   const m = 2;
   return {
     c0: max(0, floor(camera.x / TILE_SIZE) - m),
-    c1: min(mapCols - 1, floor((camera.x + CANVAS_W) / TILE_SIZE) + m),
+    c1: min(mapCols - 1, floor((camera.x + width) / TILE_SIZE) + m),
     r0: max(0, floor(camera.y / TILE_SIZE) - m),
-    r1: min(mapRows - 1, floor((camera.y + CANVAS_H) / TILE_SIZE) + m),
+    r1: min(mapRows - 1, floor((camera.y + height) / TILE_SIZE) + m),
   };
 }
 
@@ -2001,7 +2046,7 @@ function drawDarknessOverlay() {
   fogLayer.clear();
   fogLayer.noStroke();
   fogLayer.fill(0, FOG_ALPHA);
-  fogLayer.rect(0, 0, CANVAS_W, CANVAS_H);
+  fogLayer.rect(0, 0, fogLayer.width, fogLayer.height);
 
   if (!lightOn) {
     image(fogLayer, 0, 0); // beam flickered off — ambient unchanged
@@ -2188,39 +2233,137 @@ function angleDifference(a, b) {
 // ---------------------------------------------------------------------
 //  SCREENS / UI
 // ---------------------------------------------------------------------
+// The title sequence. It opens on black and builds in four overlapping beats:
+// the blood mist bleeds up, the logo swells into place while stuttering like a
+// failing bulb, the tagline types itself out, and the prompt fades in last.
+// Once settled it never fully stops moving — the logo breathes and the mist
+// drifts — so the screen reads as alive rather than as a static image.
+//
+// Timings are in milliseconds from startAnimAt. Nothing here gates input:
+// SPACE works from the first frame, so the animation can never trap a player
+// who has seen it before.
+const TITLE_MIST_IN = 200;
+const TITLE_LOGO_AT = 500;
+const TITLE_LOGO_MS = 1700;
+const TITLE_CAPTION_AT = 1800;
+const TITLE_CAPTION_MS = 1100;
+const TITLE_PROMPT_AT = 3000;
+const TITLE_PROMPT_MS = 700;
+
+// Hard dropouts during the logo reveal, as offsets from TITLE_LOGO_AT. Short
+// and irregular so it reads as a dying filament rather than a repeating loop.
+const TITLE_STUTTER = [
+  [560, 625],
+  [780, 815],
+  [1180, 1225],
+];
+
+function easeOutCubic(t) {
+  return 1 - pow(1 - t, 3);
+}
+
 function drawStartScreen() {
+  const t = millis() - startAnimAt;
   background(0);
-  // faint blood-mist vignette
   noStroke();
+
+  // --- blood mist, sized off the window so it fills any aspect ratio -------
+  const mist = constrain((t - TITLE_MIST_IN) / 1800, 0, 1);
+  const span = max(width, height);
   for (let i = 0; i < 3; i++) {
-    fill(40 + i * 10, 0, 0, 18);
-    ellipse(width / 2, height / 2 - 40, 700 - i * 140, 460 - i * 90);
+    const drift = sin(millis() / 3400 + i * 1.7) * span * 0.02;
+    fill(40 + i * 10, 0, 0, 20 * mist);
+    ellipse(
+      width / 2 + drift,
+      height * 0.46 + drift * 0.4,
+      span * (0.95 - i * 0.19),
+      span * (0.62 - i * 0.13),
+    );
+  }
+
+  // --- logo ---------------------------------------------------------------
+  const lp = constrain((t - TITLE_LOGO_AT) / TITLE_LOGO_MS, 0, 1);
+  const lg = easeOutCubic(lp);
+
+  let bulb = 1;
+  if (lp > 0 && lp < 1) {
+    for (const [a, b] of TITLE_STUTTER) {
+      if (t > TITLE_LOGO_AT + a && t < TITLE_LOGO_AT + b) bulb = 0.18;
+    }
+  } else if (lp >= 1) {
+    // settled: a shallow, uneven glimmer rather than a clean sine
+    bulb = 0.9 + 0.1 * noise(millis() / 500);
+  }
+
+  // The tagline and prompt sit under the logo, so the logo is sized against the
+  // space left after reserving room for them and the whole stack is centred as
+  // one block. Sizing the logo off the window height alone pushes the prompt off
+  // the bottom edge on a short window.
+  const TEXT_BLOCK = 130;
+  let logoBottom = height * 0.62;
+  if (lp > 0 && splashImg && splashImg.width) {
+    const fit = min(
+      (width * 0.62) / splashImg.width,
+      max(60, height - TEXT_BLOCK - 60) / splashImg.height,
+    );
+    // Overshoot slightly and settle — the logo lurches toward the player.
+    const breathe = lp >= 1 ? 1 + 0.007 * sin(millis() / 1600) : 1;
+    const grow = (1.14 - 0.14 * lg) * breathe;
+    const w = splashImg.width * fit * grow;
+    const h = splashImg.height * fit * grow;
+    const cx = width / 2;
+    const top = (height - (splashImg.height * fit + TEXT_BLOCK)) / 2;
+    const cy = top + (splashImg.height * fit) / 2;
+    logoBottom = cy + (splashImg.height * fit) / 2;
+
+    // red bloom behind the letters, brightest as it lands
+    const ctx = drawingContext;
+    const bloom = ctx.createRadialGradient(cx, cy, 0, cx, cy, max(w, h) * 0.62);
+    bloom.addColorStop(0, `rgba(150,10,10,${0.5 * lg * bulb})`);
+    bloom.addColorStop(0.55, `rgba(90,0,0,${0.22 * lg * bulb})`);
+    bloom.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save();
+    ctx.fillStyle = bloom;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+
+    push();
+    imageMode(CENTER);
+    tint(255, 255 * lg * bulb);
+    image(splashImg, cx, cy, w, h);
+    pop();
+    noTint();
   }
 
   textAlign(CENTER, CENTER);
 
-  // Title — large red vampire font, sized to fit
-  textFont(TITLE_FONT);
-  let size = 100;
-  textSize(size);
-  while (textWidth("HEAR NO EVIL") > width - 70 && size > 40) {
-    size -= 2;
-    textSize(size);
+  // --- tagline, typed out -------------------------------------------------
+  const CAPTION = "you cannot hear what hunts you";
+  const cp = constrain((t - TITLE_CAPTION_AT) / TITLE_CAPTION_MS, 0, 1);
+  if (cp > 0) {
+    const shown = CAPTION.slice(0, ceil(cp * CAPTION.length));
+    textFont("monospace");
+    textSize(max(15, min(22, width * 0.014)));
+    fill(150, 30, 30);
+    text(shown, width / 2, logoBottom + 42);
+    // a cursor block while it is still typing
+    if (cp < 1 && floor(millis() / 260) % 2 === 0) {
+      const half = textWidth(shown) / 2;
+      fill(150, 30, 30, 190);
+      rect(width / 2 + half + 3, logoBottom + 34, 9, 16);
+    }
   }
-  fill(35, 0, 0);
-  text("HEAR NO EVIL", width / 2 + 5, height / 2 - 86 + 5);
-  fill(170, 14, 14);
-  text("HEAR NO EVIL", width / 2, height / 2 - 86);
 
-  textFont("monospace");
-  fill(150, 30, 30);
-  textSize(16);
-  text("you cannot hear what hunts you", width / 2, height / 2 - 6);
+  // --- prompt -------------------------------------------------------------
+  const pp = constrain((t - TITLE_PROMPT_AT) / TITLE_PROMPT_MS, 0, 1);
+  if (pp > 0) {
+    const pulse = 150 + 105 * sin(millis() / 400);
+    fill(220, 220, 220, pulse * pp);
+    textFont("monospace");
+    textSize(max(16, min(24, width * 0.016)));
+    text("press SPACE to begin", width / 2, logoBottom + 96);
+  }
 
-  let a = 150 + 105 * sin(millis() / 400);
-  fill(220, 220, 220, a);
-  textSize(22);
-  text("press SPACE to begin", width / 2, height / 2 + 70);
   textAlign(LEFT, BASELINE);
 }
 
