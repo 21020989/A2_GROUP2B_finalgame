@@ -15,7 +15,7 @@
     "l": "streetlamp \u2014 solid post, and a safe zone that burns out once used"
   },
   "cols": 60,
-  "rows": 24,
+  "rows": 23,
   "tileSize": 40,
   "spawn": {
     "x": 100,
@@ -26,6 +26,17 @@
     "y": 480
   },
   "vampireSpeed": 1.05,
+  "flashlight": {
+    "failing": true,
+    "onMs": [
+      180,
+      430
+    ],
+    "offMs": [
+      1500,
+      3000
+    ]
+  },
   "door": {
     "x": 2360,
     "y": 440,
@@ -46,7 +57,6 @@
     "taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaat",
     "tdaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaaddaa",
     "taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaat",
     "tnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnt",
     "tccccccccccccclccccccccccccccclccccccccccccccclcccccccccccct",
     "tgggfggggggggggggggggggggfgfgggggrgfgrfgggffgggfgggrfgfgfggt",

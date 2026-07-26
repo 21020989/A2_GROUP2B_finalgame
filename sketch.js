@@ -738,6 +738,12 @@ function initGame(level) {
   vampRepathAt = 0;
   buildVampGrid();
   buildLamps();
+  // Start every level with the torch in hand rather than mid-blackout.
+  failOn = true;
+  failUntil = 0;
+  failStrobeAt = 0;
+  lightOn = true;
+  flickering = false;
   gameState = "play";
 }
 
@@ -1012,8 +1018,41 @@ function updateCamera() {
 // ---------------------------------------------------------------------
 //  FLICKER
 // ---------------------------------------------------------------------
+// A level can declare its torch as failing, via "flashlight" in the map JSON.
+// The street does: out there the flashlight is nearly dead, off most of the
+// time and catching only for a fraction of a second, which is what makes the
+// streetlamps the level's real light source instead of a convenience. Levels
+// that say nothing keep the original behaviour — on, with rare flickers.
+let failOn = false,
+  failUntil = 0,
+  failStrobeAt = 0;
+
+function updateFailingLight(t, cfg) {
+  if (t >= failUntil) {
+    failOn = !failOn;
+    const range = failOn ? cfg.onMs : cfg.offMs;
+    failUntil = t + random(range[0], range[1]);
+  }
+  if (!failOn) {
+    lightOn = false;
+    return;
+  }
+  // Even when it catches it stutters, so a burst is never a clean look around.
+  if (t >= failStrobeAt) {
+    failStrobeAt = t + random(40, 110);
+    lightOn = random() < 0.72;
+  }
+}
+
 function updateFlicker() {
   let t = millis();
+
+  const cfg = tileMapData && tileMapData.flashlight;
+  if (cfg && cfg.failing && gameState === "play") {
+    updateFailingLight(t, cfg);
+    return;
+  }
+
   if (!flickering) {
     if (t >= nextFlickerAt) {
       flickering = true;

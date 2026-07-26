@@ -29,7 +29,7 @@ To keep it fair rather than arbitrary, a puddle triggers on the tile under the p
 
 Level 3 — The Street. Stepping through the courtyard's gate puts you on the road out of town, at night, laid out in `data/street.json`. It runs west to east in bands: treeline, verge, kerb, the carriageway with its broken centre line, kerb, verge, treeline. The treeline is the level boundary, and the gap in it at the eastern end is the way out. The whole palette is darkened and pushed toward blue against the daytime reference we worked from, so the road reads as lit only by the moon.
 
-Two things make it the hardest stage. The vampire is faster here — `vampireSpeed` in the level JSON raises it from 0.7 of the player's speed to 1.05, so for the first time you cannot simply outrun it. And the road is open: there are no corners to break line of sight the way the mansion's rooms and the courtyard's hedges allowed.
+Three things make it the hardest stage. The vampire is faster here — `vampireSpeed` in the level JSON raises it from 0.7 of the player's speed to 1.05, so for the first time you cannot simply outrun it. The road is open, with none of the corners the mansion's rooms and the courtyard's hedges gave you to break line of sight. And your torch is nearly dead: the level's `flashlight` block marks it as failing, so it sits dark and only catches for a fraction of a second at a time — about a tenth of the time, in bursts of under half a second. Freezing the vampire with the beam, which carried you through the first two levels, is barely available here.
 
 What you get instead is the streetlamps. A lamp casts a pool of light the vampire will not walk into, so standing under one makes you untouchable — it circles the rim instead. But a lamp starts dying the moment you step under it, gutters for the last second or so, and once it is out it stays out. There are seven, alternating between the north and south kerbs, so the safe route zigzags across the carriageway rather than running straight down one verge. They are stepping stones, not a fort: the level is about choosing when to spend one.
 
@@ -37,7 +37,7 @@ Because lamps are simply an `l` in the map and their pool is drawn above the dar
 
 All three levels use the same tile-map format, so `drawRoom()` and `initGame()` are level-agnostic; `LEVELS` in `sketch.js` just points each stage at its own JSON and its own floor/wall/corner images.
 
-**One placeholder.** `assets/images/streetlamp.png` is a stand-in so the safe-zone mechanic could be built and tested. Our art subgroup is drawing the real one. The pool of light is drawn by the game rather than baked into the tile, so replacing the art changes nothing but the post itself.
+**One placeholder.** `assets/images/streetlamp.png` is not a drawing of a lamp — it is a bordered box with the word LAMP in it, so nobody mistakes it for finished art or ships it by accident. Our art subgroup is drawing the real one. The pool of light is drawn by the game rather than baked into the tile, so dropping the real art in at the same filename and size changes nothing but the post itself.
 
 ## Setup and Interaction Instructions
 

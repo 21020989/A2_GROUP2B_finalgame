@@ -93,168 +93,195 @@ def outline_alpha(img, colour=OUTLINE):
     return img
 
 
+# --- shape helpers ---------------------------------------------------
+# The first two levels are built from readable shapes — bricks with mortar
+# lines, cobbles with outlines — in a handful of flat colours. An earlier draft
+# of this set used per-pixel noise instead, which reads as photographic grain
+# rather than pixel art and did not sit next to them. Everything below is drawn
+# as flat regions at a 3-6px scale, with speckle used only as an accent.
+
+
+def patches(seed, freq, levels):
+    """Wrapping field flattened to `levels` bands — large flat regions of
+    slightly different tone, rather than a continuous gradient."""
+    f = value_noise(seed, freq)
+    return [[min(levels - 1, int(f[y][x] * levels)) for x in range(N)] for y in range(N)]
+
+
+def blob(px, cx, cy, r, colour, rnd=None, ragged=0.0):
+    """Filled disc, wrapping at the tile edge."""
+    for y in range(int(cy - r - 1), int(cy + r + 2)):
+        for x in range(int(cx - r - 1), int(cx + r + 2)):
+            d = math.hypot(x - cx, y - cy)
+            edge = r + (rnd.uniform(-ragged, ragged) if rnd and ragged else 0)
+            if d <= edge:
+                px[x % N, y % N] = colour + (255,)
+
+
 # --- road ------------------------------------------------------------
-def asphalt(seed=7, wear=0.0):
-    """Grainy tarmac. Two noise octaves so it reads as aggregate, not static."""
+def asphalt(seed=7):
+    """Tarmac: a flat base broken into a few large worn patches, with sparse
+    chips of aggregate. No per-pixel grain."""
     img = new(255)
     px = img.load()
-    coarse = value_noise(seed, 4)
-    fine = value_noise(seed + 1, 16)
+    band = patches(seed, 3, 3)
     rnd = random.Random(seed + 2)
     for y in range(N):
         for x in range(N):
-            v = coarse[y][x] * 0.6 + fine[y][x] * 0.4
-            idx = min(len(ASPHALT) - 1, int(v * len(ASPHALT)))
-            c = ASPHALT[idx]
-            if wear:
-                c = mix(c, ASPHALT[0], wear * fine[y][x])
-            # scattered lighter chips of aggregate
-            if rnd.random() < 0.05:
-                c = shade(c, 1.25)
-            elif rnd.random() < 0.04:
-                c = shade(c, 0.82)
-            px[x, y] = c + (255,)
+            px[x, y] = ASPHALT[1 + band[y][x]] + (255,)
+    # aggregate: a handful of 2x2 chips, light and dark
+    for _ in range(14):
+        cx, cy = rnd.randrange(N), rnd.randrange(N)
+        c = ASPHALT[0] if rnd.random() < 0.6 else ASPHALT[4]
+        for dy in range(2):
+            for dx in range(2):
+                px[(cx + dx) % N, (cy + dy) % N] = c + (255,)
+    # a couple of longer cracks, drawn as short runs rather than noise
+    for _ in range(2):
+        x, y = rnd.randrange(N), rnd.randrange(N)
+        for _ in range(rnd.randint(6, 11)):
+            px[x % N, y % N] = ASPHALT[4] + (255,)
+            x += rnd.choice((0, 1, 1))
+            y += rnd.choice((-1, 0, 1))
     return img
 
 
 def road_dash():
     """Asphalt carrying one segment of the centre line.
 
-    The road runs left to right, so the dash is a horizontal bar. A dash tile
-    followed by plain asphalt tiles gives the broken line.
+    The road runs left to right, so the dash is a horizontal bar. The bar sits
+    on the tile's centre line, so a dash tile placed on the road's middle row
+    puts the paint exactly down the middle of the carriageway.
     """
     img = asphalt(11)
     px = img.load()
-    grain = value_noise(31, 8)
+    rnd = random.Random(31)
     for y in range(14, 18):
         for x in range(N):
-            # worn paint: thinner and patchier toward the ends of the segment
-            edge = min(x, N - 1 - x) / 6.0
-            keep = min(1.0, edge) * (0.55 + 0.45 * grain[y][x])
-            if keep < 0.28:
-                continue
-            base = PAINT[0] if 15 <= y <= 16 else PAINT[1]
-            px[x, y] = mix(px[x, y][:3], base, keep) + (255,)
+            c = PAINT[0] if 15 <= y <= 16 else PAINT[1]
+            px[x, y] = c + (255,)
+    # worn: a few flat bites taken out of the paint, not a noise mask
+    for _ in range(7):
+        cx, cy = rnd.randrange(N), rnd.choice((14, 17))
+        for dx in range(rnd.randint(1, 3)):
+            px[(cx + dx) % N, cy] = ASPHALT[1] + (255,)
     return img
 
 
 def road_edge():
     """Asphalt with the solid white edge line along its top.
 
-    Drawn once and rotated 180 degrees by the renderer for the far verge, the
-    same trick the wall set uses, so only one tile is needed for both sides.
+    Drawn once and rotated 180 degrees by the renderer for the far side of the
+    road, the same trick the wall set uses, so one tile serves both.
     """
     img = asphalt(13)
     px = img.load()
-    grain = value_noise(37, 8)
+    rnd = random.Random(37)
     for y in range(2, 5):
         for x in range(N):
-            keep = 0.6 + 0.4 * grain[y][x]
-            base = PAINT[0] if y == 3 else PAINT[1]
-            px[x, y] = mix(px[x, y][:3], base, keep) + (255,)
-    # a little grit gathering against the line
-    for x in range(N):
-        if grain[6][x] > 0.62:
-            px[x, 5] = shade(px[x, 5][:3], 0.9) + (255,)
+            px[x, y] = (PAINT[0] if y == 3 else PAINT[1]) + (255,)
+    for _ in range(6):
+        cx = rnd.randrange(N)
+        px[cx, rnd.choice((2, 4))] = ASPHALT[1] + (255,)
     return img
 
 
 def kerb():
-    """Concrete strip between road and verge. Symmetric top to bottom so the
-    same tile serves either side of the carriageway."""
+    """Concrete strip between road and verge, laid as slabs. Symmetric top to
+    bottom so the same tile serves either side of the carriageway."""
     img = new(255)
     px = img.load()
-    grain = value_noise(41, 10)
+    rnd = random.Random(41)
     for y in range(N):
-        # bright along the middle, darker at both edges where it meets road/grass
+        # three flat bands: darker where it meets road and grass, light between
         d = abs(y - (N - 1) / 2) / ((N - 1) / 2)
-        idx = int(d * (len(CONCRETE) - 1) + grain[y][0] * 0.6)
-        idx = max(0, min(len(CONCRETE) - 1, idx))
+        c = CONCRETE[0] if d < 0.35 else (CONCRETE[1] if d < 0.75 else CONCRETE[2])
         for x in range(N):
-            v = grain[y][x]
-            c = CONCRETE[max(0, min(len(CONCRETE) - 1, idx + (1 if v > 0.72 else 0)))]
-            if v < 0.12:
-                c = shade(c, 0.86)  # chips and cracks
             px[x, y] = c + (255,)
-    # expansion joints every 16px, wrapping
+    # slab joints every 16px, wrapping, plus the long edges
     for x in (0, 16):
         for y in range(N):
-            px[x, y] = shade(px[x, y][:3], 0.62) + (255,)
+            px[x, y] = CONCRETE[3] + (255,)
+    for y in (0, N - 1):
+        for x in range(N):
+            px[x, y] = CONCRETE[3] + (255,)
+    # a few chipped corners
+    for _ in range(6):
+        cx, cy = rnd.randrange(N), rnd.randrange(N)
+        px[cx, cy] = CONCRETE[2] + (255,)
+        px[(cx + 1) % N, cy] = CONCRETE[2] + (255,)
     return img
 
 
 # --- verge -----------------------------------------------------------
 def verge(seed=3, dry=0.0, tuft=0):
-    """Night grass. Wraps; no blade crosses the tile edge unbroken."""
+    """Night grass: two flat tones in large patches, with readable tufts sitting
+    on top. Built the way the courtyard's moss is, so the two sit together."""
     img = new(255)
     px = img.load()
-    coarse = value_noise(seed, 3)
-    fine = value_noise(seed + 5, 12)
+    # Higher frequency than the road: large aligned bands make the repeat
+    # obvious once a field of these is laid down.
+    band = patches(seed, 5, 2)
     rnd = random.Random(seed + 9)
     for y in range(N):
         for x in range(N):
-            v = coarse[y][x] * 0.65 + fine[y][x] * 0.35
-            pal = GRASS
-            if dry and fine[y][x] > 1.0 - dry:
-                pal = GRASS_DRY
-            idx = min(len(pal) - 1, int(v * len(pal)))
-            px[x, y] = pal[idx] + (255,)
-    # short blades, drawn as 2-3px verticals so they read at 40px on screen
-    for _ in range(18 + tuft * 22):
-        bx = rnd.randrange(N)
-        by = rnd.randrange(N)
-        h = rnd.choice((2, 3, 3, 4))
-        c = shade(GRASS[rnd.randrange(2)], 1.0 + rnd.random() * 0.2)
-        for i in range(h):
-            yy = (by - i) % N
-            px[bx, yy] = c + (255,)
+            px[x, y] = GRASS[2 + band[y][x]] + (255,)
+
+    # dry ground shows as whole patches, not speckle
+    if dry:
+        for _ in range(int(3 + dry * 6)):
+            blob(px, rnd.randrange(N), rnd.randrange(N), rnd.uniform(3, 5.5),
+                 GRASS_DRY[1], rnd, ragged=0.8)
+
+    # tufts: a 4-5px clump of blades, dark base and lit tip, so it reads as a
+    # shape at 40px on screen rather than as scattered pixels
+    for _ in range(9 + tuft * 5):
+        bx, by = rnd.randrange(N), rnd.randrange(N)
+        w = rnd.randint(3, 5)
+        for i in range(w):
+            h = rnd.choice((3, 4, 4, 5))
+            x = (bx + i) % N
+            for j in range(h):
+                y = (by - j) % N
+                px[x, y] = (GRASS[1] if j < h - 1 else GRASS[3]) + (255,)
+            px[x, (by - h) % N] = GRASS[0] + (255,)
     return img
 
 
 def bush():
-    """Low shrub on the verge. Solid — it blocks the player and the vampire."""
+    """Low shrub on the verge. Solid — it blocks the player and the vampire.
+    Built from a few overlapping clumps with a dark outline, matching the
+    courtyard hedge."""
     img = new(0)
     px = img.load()
     rnd = random.Random(77)
-    blobs = [(10, 12, 8), (21, 14, 7), (15, 21, 8), (24, 22, 5), (7, 21, 5)]
-    for cx, cy, r in blobs:
-        for y in range(N):
-            for x in range(N):
-                d = math.hypot(x - cx, y - cy)
-                if d > r + rnd.random() * 1.4 - 0.7:
-                    continue
-                t = d / max(1e-6, r)
-                idx = min(len(LEAF) - 1, int(t * 3) + (1 if rnd.random() < 0.3 else 0))
-                px[x, y] = LEAF[idx] + (255,)
-    # a few lighter leaves catching what moonlight there is
-    for _ in range(26):
-        x, y = rnd.randrange(N), rnd.randrange(N)
-        if px[x, y][3] > 0:
-            px[x, y] = shade(LEAF[0], 1.25) + (255,)
+    for cx, cy, r, tone in ((11, 13, 8, 2), (21, 15, 7, 2), (16, 22, 7, 3),
+                            (24, 23, 5, 3), (8, 22, 5, 3)):
+        blob(px, cx, cy, r, LEAF[tone], rnd, ragged=1.0)
+    # lit crowns, offset up-left as if catching the moon
+    for cx, cy, r in ((10, 11, 4), (20, 13, 3.5), (15, 20, 3.5)):
+        blob(px, cx, cy, r, LEAF[1], rnd, ragged=0.7)
+    for cx, cy, r in ((9, 10, 2), (19, 12, 1.8)):
+        blob(px, cx, cy, r, LEAF[0], rnd, ragged=0.4)
     return outline_alpha(img)
 
 
 def tree():
-    """Dense canopy for the treeline that walls the level in. Fills the tile so
-    a run of them reads as unbroken woodland rather than separate blobs."""
+    """Dense canopy for the treeline that walls the level in. Fills the tile, so
+    a run of them reads as unbroken woodland, but keeps visible clump structure
+    rather than dissolving into noise."""
     img = new(255)
     px = img.load()
-    coarse = value_noise(61, 3)
-    fine = value_noise(67, 9)
     rnd = random.Random(83)
     for y in range(N):
         for x in range(N):
-            v = coarse[y][x] * 0.6 + fine[y][x] * 0.4
-            idx = min(len(LEAF) - 1, int(v * (len(LEAF) - 1)) + 1)
-            px[x, y] = LEAF[idx] + (255,)
-    # clumped highlights so the mass has depth
-    for _ in range(40):
-        cx, cy = rnd.randrange(N), rnd.randrange(N)
-        r = rnd.choice((2, 2, 3))
-        for y in range(cy - r, cy + r + 1):
-            for x in range(cx - r, cx + r + 1):
-                if math.hypot(x - cx, y - cy) <= r:
-                    px[x % N, y % N] = shade(LEAF[1], 1.18) + (255,)
+            px[x, y] = LEAF[4] + (255,)
+    # Canopy clumps at three depths, wrapping. More and smaller than the first
+    # pass: a few big blobs made the tile repeat read as a pattern.
+    for tone, count, rad in ((3, 14, (3, 5)), (2, 12, (2, 3.5)), (1, 8, (1.4, 2.4))):
+        for _ in range(count):
+            blob(px, rnd.randrange(N), rnd.randrange(N),
+                 rnd.uniform(*rad), LEAF[tone], rnd, ragged=1.1)
     return img
 
 
@@ -262,62 +289,72 @@ def dirt():
     """Worn patch where the grass has given up — bare ground by the roadside."""
     img = new(255)
     px = img.load()
-    coarse = value_noise(91, 4)
-    fine = value_noise(97, 14)
+    band = patches(91, 3, 2)
     rnd = random.Random(101)
     for y in range(N):
         for x in range(N):
-            v = coarse[y][x] * 0.6 + fine[y][x] * 0.4
-            idx = min(len(DIRT) - 1, int(v * len(DIRT)))
-            c = DIRT[idx]
-            if rnd.random() < 0.05:
-                c = shade(c, 1.2)  # grit
-            px[x, y] = c + (255,)
-    # a little grass creeping back in at the margins
-    for _ in range(22):
-        x, y = rnd.randrange(N), rnd.randrange(N)
-        px[x, y] = shade(GRASS[2], 0.95) + (255,)
+            px[x, y] = DIRT[1 + band[y][x]] + (255,)
+    # stones, as 2x2 blocks
+    for _ in range(9):
+        cx, cy = rnd.randrange(N), rnd.randrange(N)
+        c = DIRT[0] if rnd.random() < 0.6 else DIRT[3]
+        for dy in range(2):
+            for dx in range(2):
+                px[(cx + dx) % N, (cy + dy) % N] = c + (255,)
+    # grass creeping back in, as clumps
+    for _ in range(3):
+        blob(px, rnd.randrange(N), rnd.randrange(N), rnd.uniform(2, 3.5),
+             GRASS[3], rnd, ragged=0.7)
     return img
 
 
 # --- PLACEHOLDER -----------------------------------------------------
-def streetlamp():
-    """PLACEHOLDER. The group is drawing the real streetlamp.
+# 5x7 pixel letters, only the four this placeholder needs.
+FONT = {
+    "L": ("X....", "X....", "X....", "X....", "X....", "X....", "XXXXX"),
+    "A": (".XXX.", "X...X", "X...X", "XXXXX", "X...X", "X...X", "X...X"),
+    "M": ("X...X", "XX.XX", "X.X.X", "X.X.X", "X...X", "X...X", "X...X"),
+    "P": ("XXXX.", "X...X", "X...X", "XXXX.", "X....", "X....", "X...."),
+}
 
-    Deliberately plain: a dark iron column with a warm head, enough to read as a
-    lamp and to sit correctly in the tile so the safe-zone mechanic can be built
-    and tested against it. The pool of light on the ground is drawn by the game,
-    not baked into this tile, so replacing this art changes nothing but the post.
+
+def streetlamp():
+    """PLACEHOLDER, and deliberately not a drawing of a lamp.
+
+    It says LAMP so nobody mistakes it for finished art or ships it by accident.
+    The group is drawing the real streetlamp. The pool of light on the ground is
+    drawn by the game rather than baked into this tile, so dropping the real art
+    in at the same filename and size changes nothing but the post itself.
     """
-    img = new(0)
+    img = new(255)
     px = img.load()
 
-    # base plinth
-    for y in range(26, 31):
-        w = 5 - (y - 26) // 2
-        for x in range(16 - w, 16 + w):
-            px[x, y] = IRON[2 if (x + y) % 3 else 3] + (255,)
+    BG = (44, 40, 52)
+    EDGE = (232, 196, 92)
+    TEXT = (240, 236, 224)
 
-    # column
-    for y in range(9, 27):
-        for x in range(14, 18):
-            c = IRON[0] if x == 14 else (IRON[1] if x < 17 else IRON[2])
-            px[x, y] = c + (255,)
+    for y in range(N):
+        for x in range(N):
+            px[x, y] = BG + (255,)
+    # hatched border, so it reads as "missing asset" at a glance
+    for i in range(N):
+        for e in (0, 1, N - 2, N - 1):
+            px[i, e] = EDGE + (255,)
+            px[e, i] = EDGE + (255,)
+    for i in range(0, N, 4):
+        px[i, 2] = EDGE + (255,)
+        px[i, N - 3] = EDGE + (255,)
 
-    # head
-    for y in range(5, 10):
-        half = 6 - abs(y - 7)
-        for x in range(16 - half, 16 + half):
-            px[x, y] = IRON[1 if y < 7 else 2] + (255,)
-
-    # glowing bulb under the hood
-    for y in range(8, 12):
-        half = 4 - abs(y - 9)
-        for x in range(16 - half, 16 + half):
-            t = 1 - abs(x - 16) / 5.0
-            px[x, y] = mix(LAMP_WARM, (255, 255, 236), t * 0.5) + (255,)
-
-    return outline_alpha(img)
+    word = "LAMP"
+    total = len(word) * 5 + (len(word) - 1)
+    x0 = (N - total) // 2
+    y0 = (N - 7) // 2
+    for k, ch in enumerate(word):
+        for row, bits in enumerate(FONT[ch]):
+            for col, bit in enumerate(bits):
+                if bit == "X":
+                    px[x0 + k * 6 + col, y0 + row] = TEXT + (255,)
+    return img
 
 
 # --- build -----------------------------------------------------------
